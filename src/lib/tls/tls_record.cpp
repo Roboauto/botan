@@ -396,7 +396,8 @@ size_t read_dtls_record(secure_vector<uint8_t>& readbuf,
                         Record_Raw_Input& raw_input,
                         Record& rec,
                         Connection_Sequence_Numbers* sequence_numbers,
-                        get_cipherstate_fn get_cipherstate)
+                        get_cipherstate_fn get_cipherstate,
+                        bool allow_epoch0_restart)
    {
    if(readbuf.size() < DTLS_HEADER_SIZE) // header incomplete?
       {
@@ -447,14 +448,16 @@ size_t read_dtls_record(secure_vector<uint8_t>& readbuf,
    *rec.get_sequence() = load_be<uint64_t>(&readbuf[3], 0);
    epoch = (*rec.get_sequence() >> 48);
 
-   if(sequence_numbers && sequence_numbers->already_seen(*rec.get_sequence()))
+   uint8_t* record_contents = &readbuf[DTLS_HEADER_SIZE];
+
+   const bool already_seen = sequence_numbers && sequence_numbers->already_seen(*rec.get_sequence());
+
+   if(already_seen && !(allow_epoch0_restart && epoch == 0))
       {
       readbuf.clear();
       *rec.get_type() = NO_RECORD;
       return 0;
       }
-
-   uint8_t* record_contents = &readbuf[DTLS_HEADER_SIZE];
 
    if(epoch == 0) // Unencrypted initial handshake
       {
@@ -500,11 +503,12 @@ size_t read_record(secure_vector<uint8_t>& readbuf,
                    Record_Raw_Input& raw_input,
                    Record& rec,
                    Connection_Sequence_Numbers* sequence_numbers,
-                   get_cipherstate_fn get_cipherstate)
+                   get_cipherstate_fn get_cipherstate,
+                   bool allow_epoch0_restart)
    {
    if(raw_input.is_datagram())
       return read_dtls_record(readbuf, raw_input, rec,
-                              sequence_numbers, get_cipherstate);
+                              sequence_numbers, get_cipherstate, allow_epoch0_restart);
    else
       return read_tls_record(readbuf, raw_input, rec,
                              sequence_numbers, get_cipherstate);

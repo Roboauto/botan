@@ -93,6 +93,8 @@ class Record final
 
       uint64_t* get_sequence() { return m_sequence; }
 
+      uint16_t epoch() const { return static_cast<uint16_t>(*m_sequence >> 48); }
+
       Record_Type* get_type() { return m_type; }
 
       size_t& get_size() { return m_size; }
@@ -178,7 +180,8 @@ size_t read_record(secure_vector<uint8_t>& read_buffer,
                    Record_Raw_Input& raw_input,
                    Record& rec,
                    Connection_Sequence_Numbers* sequence_numbers,
-                   get_cipherstate_fn get_cipherstate);
+                   get_cipherstate_fn get_cipherstate,
+                   bool allow_epoch0_restart);
 
 }
 

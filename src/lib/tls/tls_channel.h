@@ -66,6 +66,7 @@ class BOTAN_PUBLIC_API(2,0) Channel
               Session_Manager& session_manager,
               RandomNumberGenerator& rng,
               const Policy& policy,
+              bool is_server,
               bool is_datagram,
               size_t io_buf_sz = IO_BUF_DEFAULT_SIZE);
 
@@ -83,6 +84,7 @@ class BOTAN_PUBLIC_API(2,0) Channel
               Session_Manager& session_manager,
               RandomNumberGenerator& rng,
               const Policy& policy,
+              bool is_server,
               bool is_datagram,
               size_t io_buf_sz = IO_BUF_DEFAULT_SIZE);
 
@@ -159,7 +161,6 @@ class BOTAN_PUBLIC_API(2,0) Channel
       * @return true iff the connection has been definitely closed
       */
       bool is_closed() const;
-
 
       /**
       * @return certificate chain of the peer (may be empty)
@@ -278,7 +279,8 @@ class BOTAN_PUBLIC_API(2,0) Channel
 
       void process_alert(const secure_vector<uint8_t>& record);
 
-      bool m_is_datagram;
+      const bool m_is_server;
+      const bool m_is_datagram;
 
       /* callbacks */
       std::unique_ptr<Compat_Callbacks> m_compat_callbacks;

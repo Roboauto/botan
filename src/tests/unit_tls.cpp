@@ -1055,11 +1055,10 @@ class DTLS_Reconnection_Test : public Test
 
                void tls_alert(Botan::TLS::Alert /*alert*/) override
                   {
-                  // TODO test that it is a no_renegotiation alert
                   // ignore
                   }
 
-               bool tls_session_established(const Botan::TLS::Session& session) override
+               bool tls_session_established(const Botan::TLS::Session& /*session*/) override
                   {
                   m_results.test_success("Established a session");
                   return true;
@@ -1187,6 +1186,7 @@ class DTLS_Reconnection_Test : public Test
          // See RFC 6347 section 4.2.8
 
          server_recv.clear();
+         s2c.clear();
 
          std::vector<uint8_t> c2_c2s, client2_recv;
          Test_Callbacks client2_callbacks(result, c2_c2s, client2_recv);

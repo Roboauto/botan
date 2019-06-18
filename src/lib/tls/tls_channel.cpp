@@ -27,8 +27,10 @@ Channel::Channel(Callbacks& callbacks,
                  Session_Manager& session_manager,
                  RandomNumberGenerator& rng,
                  const Policy& policy,
+                 bool is_server,
                  bool is_datagram,
                  size_t reserved_io_buffer_size) :
+   m_is_server(is_server),
    m_is_datagram(is_datagram),
    m_callbacks(callbacks),
    m_session_manager(session_manager),
@@ -46,8 +48,10 @@ Channel::Channel(output_fn out,
                  Session_Manager& session_manager,
                  RandomNumberGenerator& rng,
                  const Policy& policy,
+                 bool is_server,
                  bool is_datagram,
                  size_t io_buf_sz) :
+    m_is_server(is_server),
     m_is_datagram(is_datagram),
     m_compat_callbacks(new Compat_Callbacks(
                           /*
@@ -66,10 +70,6 @@ Channel::Channel(output_fn out,
 
 void Channel::init(size_t io_buf_sz)
    {
-   /* epoch 0 is plaintext, thus null cipher state */
-   m_write_cipher_states[0] = nullptr;
-   m_read_cipher_states[0] = nullptr;
-
    m_writebuf.reserve(io_buf_sz);
    m_readbuf.reserve(io_buf_sz);
    }
@@ -96,6 +96,10 @@ Connection_Sequence_Numbers& Channel::sequence_numbers() const
 
 std::shared_ptr<Connection_Cipher_State> Channel::read_cipher_state_epoch(uint16_t epoch) const
    {
+   // epoch 0 is plaintext, thus null cipher state
+   if(epoch == 0)
+      return std::shared_ptr<Connection_Cipher_State>();
+
    auto i = m_read_cipher_states.find(epoch);
    if(i == m_read_cipher_states.end())
       throw Internal_Error("TLS::Channel No read cipherstate for epoch " + std::to_string(epoch));
@@ -104,6 +108,9 @@ std::shared_ptr<Connection_Cipher_State> Channel::read_cipher_state_epoch(uint16
 
 std::shared_ptr<Connection_Cipher_State> Channel::write_cipher_state_epoch(uint16_t epoch) const
    {
+   if(epoch == 0)
+      return std::shared_ptr<Connection_Cipher_State>();
+
    auto i = m_write_cipher_states.find(epoch);
    if(i == m_write_cipher_states.end())
       throw Internal_Error("TLS::Channel No write cipherstate for epoch " + std::to_string(epoch));
@@ -314,12 +321,16 @@ size_t Channel::received_data(const uint8_t input[], size_t input_size)
 
          Record_Raw_Input raw_input(input, input_size, consumed, m_is_datagram);
          Record record(record_data, &record_sequence, &record_version, &record_type);
+         auto get_epoch = [this](uint16_t epoch) { return read_cipher_state_epoch(epoch); };
+         bool allow_epoch0_restart = m_is_datagram && m_is_server && policy().allow_dtls_epoch0_restart();
+
          const size_t needed =
             read_record(m_readbuf,
                         raw_input,
                         record,
                         m_sequence_numbers.get(),
-                        [this](uint16_t epoch) { return read_cipher_state_epoch(epoch); });
+                        get_epoch,
+                        allow_epoch0_restart);
 
          BOTAN_ASSERT(consumed > 0, "Got to eat something");
 
@@ -342,6 +353,19 @@ size_t Channel::received_data(const uint8_t input[], size_t input_size)
          if(record_data.size() > MAX_PLAINTEXT_SIZE)
             throw TLS_Exception(Alert::RECORD_OVERFLOW,
                                 "TLS plaintext record is larger than allowed maximum");
+
+         const bool is_epoch0_restart = m_is_datagram && record.epoch() == 0 && active_state();
+         BOTAN_ASSERT_IMPLICATION(is_epoch0_restart, allow_epoch0_restart, "Allowed state");
+
+         if(is_epoch0_restart)
+            {
+            // XXX this allows blind reset of state
+            m_pending_state.reset();
+            m_active_state.reset();
+            m_sequence_numbers.reset();
+            m_write_cipher_states.clear();
+            m_read_cipher_states.clear();
+            }
 
          if(auto pending = pending_state())
             {

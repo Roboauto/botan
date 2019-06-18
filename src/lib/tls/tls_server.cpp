@@ -303,7 +303,7 @@ Server::Server(Callbacks& callbacks,
                bool is_datagram,
                size_t io_buf_sz) :
    Channel(callbacks, session_manager, rng, policy,
-           is_datagram, io_buf_sz),
+           true, is_datagram, io_buf_sz),
    m_creds(creds)
    {
    }
@@ -321,7 +321,7 @@ Server::Server(output_fn output,
                size_t io_buf_sz) :
    Channel(output, got_data_cb, recv_alert_cb, hs_cb,
            Channel::handshake_msg_cb(), session_manager,
-           rng, policy, is_datagram, io_buf_sz),
+           rng, policy, true, is_datagram, io_buf_sz),
    m_creds(creds),
    m_choose_next_protocol(next_proto)
    {
@@ -339,7 +339,7 @@ Server::Server(output_fn output,
                next_protocol_fn next_proto,
                bool is_datagram) :
    Channel(output, got_data_cb, recv_alert_cb, hs_cb, hs_msg_cb,
-           session_manager, rng, policy, is_datagram),
+           session_manager, rng, policy, true, is_datagram),
    m_creds(creds),
    m_choose_next_protocol(next_proto)
    {
