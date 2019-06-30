@@ -13,10 +13,10 @@ namespace Botan {
 
 size_t Intel_Rdrand::poll(RandomNumberGenerator& rng)
    {
-   if(BOTAN_ENTROPY_INTEL_RNG_POLLS > 0 && RDRAND_RNG::available())
+   if(RDRAND_RNG::available() && BOTAN_ENTROPY_INTEL_RDRAND_BYTES > 0)
       {
       RDRAND_RNG rdrand_rng;
-      secure_vector<uint8_t> buf(4 * BOTAN_ENTROPY_INTEL_RNG_POLLS);
+      secure_vector<uint8_t> buf(BOTAN_ENTROPY_INTEL_RDRAND_BYTES);
 
       rdrand_rng.randomize(buf.data(), buf.size());
       rng.add_entropy(buf.data(), buf.size());

@@ -210,20 +210,26 @@
 #define BOTAN_SYSTEM_RNG_POLL_TIMEOUT_MS 20
 
 /*
-How many times to read from the RDRAND/RDSEED RNGs.
-Each read generates 32 bits of output
+* How many bytes of output to read from RDRAND for seeding purposes.
+* We default to 8192 bytes which is (according to Intel documentation)
+* guaranteed to cause at least one reseeding of the internal RNG.
 */
-#define BOTAN_ENTROPY_INTEL_RNG_POLLS 32
+#define BOTAN_ENTROPY_INTEL_RDRAND_BYTES 8192
 
 /*
-According to Intel, RDRAND is guaranteed to generate a random
-number within 10 retries on a working CPU
+* How many bytes of output to read from RDSEED for seeding purposes.
+*/
+#define BOTAN_ENTROPY_INTEL_RDSEED_BYTES 128
+
+/*
+* According to Intel, RDRAND is guaranteed to generate a random
+* number within 10 retries on a working CPU
 */
 #define BOTAN_ENTROPY_RDRAND_RETRIES 10
 
 /*
-* RdSeed is not guaranteed to generate a random number within a specific number of retries
-* Define the number of retries here
+* RdSeed is not guaranteed to generate a random number within a
+* specific number of retries. Define the number of retries here.
 */
 #define BOTAN_ENTROPY_RDSEED_RETRIES 20
 

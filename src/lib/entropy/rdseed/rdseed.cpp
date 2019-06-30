@@ -17,9 +17,12 @@ namespace Botan {
 BOTAN_FUNC_ISA("rdseed")
 size_t Intel_Rdseed::poll(RandomNumberGenerator& rng)
    {
-   if(CPUID::has_rdseed())
+   if(CPUID::has_rdseed() && BOTAN_ENTROPY_INTEL_RDSEED_BYTES > 0)
       {
-      for(size_t p = 0; p != BOTAN_ENTROPY_INTEL_RNG_POLLS; ++p)
+      secure_vector<uint32_t> seed;
+      seed.reserve(BOTAN_ENTROPY_INTEL_RDSEED_BYTES / 4);
+
+      for(size_t p = 0; p != BOTAN_ENTROPY_INTEL_RDSEED_BYTES / 4; ++p)
          {
          for(size_t i = 0; i != BOTAN_ENTROPY_RDSEED_RETRIES; ++i)
             {
@@ -36,13 +39,17 @@ size_t Intel_Rdseed::poll(RandomNumberGenerator& rng)
 #endif
             if(1 == cf)
                {
-               rng.add_entropy_T(r);
+               seed.push_back(r);
                break;
                }
             }
          }
+
+      rng.add_entropy(reinterpret_cast<const uint8_t*>(seed.data()),
+                      seed.size() * sizeof(uint32_t));
       }
 
+   // RDSEED is used but not trusted
    return 0;
    }
 
