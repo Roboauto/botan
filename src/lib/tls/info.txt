@@ -22,6 +22,10 @@ tls_server.h
 tls_session.h
 tls_session_manager.h
 tls_version.h
+asio/asio_async_ops.h
+asio/asio_context.h
+asio/asio_error.h
+asio/asio_stream.h
 </header:public>
 
 <header:internal>

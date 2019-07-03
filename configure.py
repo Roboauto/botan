@@ -213,11 +213,6 @@ class BuildPaths(object): # pylint: disable=too-many-instance-attributes
 
         self.public_headers = sorted(flatten([m.public_headers() for m in modules]))
 
-        self.public_headers.append('./src/lib/tls/asio/asio_async_ops.h')
-        self.public_headers.append('./src/lib/tls/asio/asio_context.h')
-        self.public_headers.append('./src/lib/tls/asio/asio_error.h')
-        self.public_headers.append('./src/lib/tls/asio/asio_stream.h')
-
         def find_sources_in(basedir, srcdir):
             for (dirpath, _, filenames) in os.walk(os.path.join(basedir, srcdir)):
                 for filename in filenames:
