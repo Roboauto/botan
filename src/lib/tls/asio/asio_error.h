@@ -12,6 +12,7 @@
 #include <botan/build.h>
 
 #include <boost/version.hpp>
+
 #if BOOST_VERSION >= 106600
 
 #include <boost/system/system_error.hpp>
@@ -21,77 +22,95 @@
 #include <botan/tls_exceptn.h>
 
 namespace Botan {
-namespace TLS {
+    namespace TLS {
 
 //! @brief An error category for TLS alerts
-struct BotanAlertCategory : boost::system::error_category
-   {
-   const char* name() const noexcept override
-      {
-      return "asio.botan.tls.alert";
-      }
+        struct BotanAlertCategory : boost::system::error_category {
+            const char* name() const noexcept override {
+                return "asio.botan.tls.alert";
+            }
 
-   std::string message(int ev) const override
-      {
-      Botan::TLS::Alert alert(static_cast<Botan::TLS::Alert::Type>(ev));
-      return alert.type_string();
-      }
-   };
+            std::string message(int ev) const override {
+                Botan::TLS::Alert alert(static_cast<Botan::TLS::Alert::Type>(ev));
+                return alert.type_string();
+            }
+        };
 
-inline const BotanAlertCategory& botan_alert_category() noexcept
-   {
-   static BotanAlertCategory category;
-   return category;
-   }
+        inline const BotanAlertCategory& botan_alert_category() noexcept {
+            static BotanAlertCategory category;
+            return category;
+        }
 
-inline boost::system::error_code make_error_code(Botan::TLS::Alert::Type c)
-   {
-   return boost::system::error_code(static_cast<int>(c), Botan::TLS::botan_alert_category());
-   }
+        inline boost::system::error_code make_error_code(Botan::TLS::Alert::Type c) {
+            return boost::system::error_code(static_cast<int>(c), Botan::TLS::botan_alert_category());
+        }
 
-}  // namespace TLS
+    }  // namespace TLS
 
 //! @brief An error category for errors from Botan (other than TLS alerts)
-struct BotanErrorCategory : boost::system::error_category
-   {
-   const char* name() const noexcept override
-      {
-      return "asio.botan.tls";
-      }
+    struct BotanErrorCategory : boost::system::error_category {
+        const char* name() const noexcept override {
+            return "asio.botan.tls";
+        }
 
-   std::string message(int ev) const override
-      {
-      return Botan::to_string(static_cast<Botan::ErrorType>(ev));
-      }
-   };
+        std::string message(int ev) const override {
+            return Botan::to_string(static_cast<Botan::ErrorType>(ev));
+        }
+    };
 
-inline const BotanErrorCategory& botan_category() noexcept
-   {
-   static BotanErrorCategory category;
-   return category;
-   }
+    inline const BotanErrorCategory& botan_category() noexcept {
+        static BotanErrorCategory category;
+        return category;
+    }
 
-inline boost::system::error_code make_error_code(Botan::ErrorType e)
-   {
-   return boost::system::error_code(static_cast<int>(e), Botan::botan_category());
-   }
+    inline boost::system::error_code make_error_code(Botan::ErrorType e) {
+        return boost::system::error_code(static_cast<int>(e), Botan::botan_category());
+    }
 
+
+    struct BotanExceptionCategory : boost::system::error_category {
+        BotanExceptionCategory(std::string message) : message_(std::move(message)) {
+
+        }
+
+        BotanExceptionCategory(const Botan::BotanExceptionCategory& ref){
+            this->message_ = ref.message_;
+        }
+
+        virtual ~BotanExceptionCategory(){
+
+        }
+
+        Botan::BotanExceptionCategory& operator=(const Botan::BotanExceptionCategory& rhs){
+            this->message_ = rhs.message_;
+        }
+
+        const char* name() const noexcept override {
+            return "asio.botan.exception";
+        }
+
+        std::string message(int) const override {
+            return message_;
+        }
+
+        std::string message_;
+    };
 }  // namespace Botan
 
 namespace boost {
-namespace system {
+    namespace system {
 
-template<> struct is_error_code_enum<Botan::TLS::Alert::Type>
-   {
-   static const bool value = true;
-   };
+        template<>
+        struct is_error_code_enum<Botan::TLS::Alert::Type> {
+            static const bool value = true;
+        };
 
-template<> struct is_error_code_enum<Botan::ErrorType>
-   {
-   static const bool value = true;
-   };
+        template<>
+        struct is_error_code_enum<Botan::ErrorType> {
+            static const bool value = true;
+        };
 
-}  // namespace system
+    }  // namespace system
 }  // namespace boost
 
 #endif // BOOST_VERSION
