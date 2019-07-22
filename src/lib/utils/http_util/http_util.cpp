@@ -34,7 +34,11 @@ std::string http_transact(const std::string& hostname,
 
    try
       {
-      socket = OS::open_socket(hostname, "http", timeout);
+      std::string delimiter = ":";
+      auto it = hostname.find(delimiter);
+      std::string host = hostname.substr(0, it);
+      std::string port = hostname.substr(it + 1, hostname.length());
+      socket = OS::open_socket(host, port.empty() ? "http" : port, timeout);
       if(!socket)
          throw Not_Implemented("No socket support enabled in build");
       }
