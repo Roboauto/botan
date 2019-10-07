@@ -19,6 +19,7 @@
 #include <botan/asio_async_ops.h>
 #include <botan/asio_context.h>
 #include <botan/asio_error.h>
+#include <botan/asio_op_wrappers.h>
 
 #include <botan/tls_callbacks.h>
 #include <botan/tls_channel.h>
@@ -48,9 +49,11 @@ namespace Botan {
  * @tparam StreamLayer type of the next layer, usually a network socket
  * @tparam ChannelT type of the native_handle, defaults to Botan::TLS::Channel, only needed for testing purposes
  */
-        template<class StreamLayer, class ChannelT = Channel>
+        template<class StreamLayer, bool DTLS = false, class ChannelT = Channel>
         class Stream {
         public:
+            using SocketType = StreamLayer;
+
             //! \name construction
             //! @{
 
@@ -105,11 +108,11 @@ namespace Botan {
                 return m_nextLayer.get_executor();
             }
 
-            const next_layer_type& next_layer() const {
+            const StreamLayer& next_layer() const {
                 return m_nextLayer;
             }
 
-            next_layer_type& next_layer() {
+            StreamLayer& next_layer() {
                 return m_nextLayer;
             }
 
@@ -217,7 +220,7 @@ namespace Botan {
                 send_pending_encrypted_data(ec);
 
                 while (!native_handle()->is_active() && !ec) {
-                    boost::asio::const_buffer read_buffer{input_buffer().data(), m_nextLayer.read_some(input_buffer(), ec)};
+                    boost::asio::const_buffer read_buffer{input_buffer().data(), SocketWrapper<StreamLayer>(m_nextLayer, input_buffer(), ec)};
                     if (ec) {
                         return;
                     }
@@ -366,7 +369,7 @@ namespace Botan {
                     return copy_received_data(buffers);
                 }
 
-                boost::asio::const_buffer read_buffer{input_buffer().data(), m_nextLayer.read_some(input_buffer(), ec)};
+                boost::asio::const_buffer read_buffer{input_buffer().data(), SocketWrapper<StreamLayer>::read(m_nextLayer, input_buffer(), ec)};
                 if (ec) {
                     return 0;
                 }
@@ -632,6 +635,13 @@ namespace Botan {
             template<class T = ChannelT>
             typename std::enable_if<std::is_same<Channel, T>::value>::type
             setup_native_handle(Connection_Side side, boost::system::error_code& ec) {
+                Protocol_Version ver;
+                if constexpr(DTLS){
+                    ver = Protocol_Version::latest_dtls_version();
+                }else{
+                    ver = Protocol_Version::latest_tls_version();
+                }
+
                 if (side == CLIENT) {
                     m_native_handle = std::unique_ptr<Client>(
                             new Client(m_core,
@@ -639,16 +649,17 @@ namespace Botan {
                                        m_context.m_credentials_manager,
                                        m_context.m_policy,
                                        m_context.m_rng,
-                                       m_context.m_server_info));
+                                       m_context.m_server_info,
+                                       ver
+                                       ));
                 } else {
-                    // TODO: First steps in order to support the server side of this stream would be to instantiate a
-                    // Botan::TLS::Server instance as the stream's native_handle and implement the handshake appropriately.
                     m_native_handle = std::unique_ptr<Server>(
                             new Server(m_core,
                                        m_context.m_session_manager,
                                        m_context.m_credentials_manager,
                                        m_context.m_policy,
-                                       m_context.m_rng));
+                                       m_context.m_rng,
+                                       ver.is_datagram_protocol()));
                 }
             }
 
@@ -657,7 +668,7 @@ namespace Botan {
                     return 0;
                 }
 
-                size_t writtenBytes = boost::asio::write(m_nextLayer, send_buffer(), ec);
+                size_t writtenBytes = SocketWrapper<StreamLayer>::write(m_nextLayer, send_buffer(), ec);
                     consume_send_buffer(writtenBytes);
 
                 return writtenBytes;

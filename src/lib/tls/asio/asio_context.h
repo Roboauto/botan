@@ -107,7 +107,7 @@ namespace Botan {
             }
 
         protected:
-            template<class S, class C> friend
+            template<class S, bool D, class C> friend
             class Stream;
 
             Credentials_Manager& m_credentials_manager;

@@ -7,6 +7,7 @@ asio_context.h
 asio_stream.h
 asio_error.h
 asio_async_ops.h
+asio_op_wrappers.h
 </header:public>
 
 <requires>

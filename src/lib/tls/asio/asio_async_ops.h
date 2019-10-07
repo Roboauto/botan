@@ -22,6 +22,7 @@
 
 #include <boost/asio.hpp>
 #include <boost/asio/yield.hpp>
+#include <botan/asio_op_wrappers.h>
 
 namespace Botan {
     namespace TLS {
@@ -149,7 +150,7 @@ namespace Botan {
 
                                     if (!m_stream.has_received_data() && !ec && boost::asio::buffer_size(m_buffers) > 0) {
                                         // The channel did not decrypt a complete record yet, we need more data from the socket.
-                                        m_stream.next_layer().async_read_some(m_stream.input_buffer(), std::move(*this));
+                                        SocketWrapper<typename Stream::SocketType>::async_read(m_stream.next_layer(), m_stream.input_buffer(), std::move(*this));
                                         return;
                                     }
 
@@ -163,7 +164,7 @@ namespace Botan {
                                         // "Reading" into a zero-byte buffer will complete immediately.
                                         m_ec = ec;
                                         yield
-                                                                                m_stream.next_layer().async_read_some(boost::asio::mutable_buffer(), std::move(*this));
+                                        SocketWrapper<typename Stream::SocketType>::async_read(m_stream.next_layer(), boost::asio::mutable_buffer(), std::move(*this));
                                         ec = m_ec;
                                     }
 
@@ -212,7 +213,7 @@ namespace Botan {
                                     m_stream.consume_send_buffer(bytes_transferred);
 
                                     if (m_stream.has_data_to_send() && !ec) {
-                                        m_stream.next_layer().async_write_some(m_stream.send_buffer(), std::move(*this));
+                                        SocketWrapper<typename Stream::SocketType>::async_write(m_stream.next_layer(), m_stream.send_buffer(), std::move(*this));
                                         return;
                                     }
 
@@ -221,7 +222,7 @@ namespace Botan {
                                         // "Writing" to a zero-byte buffer will complete immediately.
                                         m_ec = ec;
                                         yield
-                                                                                m_stream.next_layer().async_write_some(boost::asio::const_buffer(), std::move(*this));
+                                        SocketWrapper<typename Stream::SocketType>::async_write(m_stream.next_layer(), boost::asio::const_buffer(), std::move(*this));
                                         ec = m_ec;
                                     }
 
@@ -325,7 +326,7 @@ namespace Botan {
 
                                     if (!m_stream.native_handle()->is_active() && !ec && !m_has_exception_cat) {
                                         // Read more encrypted TLS data from the network
-                                        m_stream.next_layer().async_read_some(m_stream.input_buffer(), std::move(*this));
+                                        SocketWrapper<typename Stream::SocketType>::async_read(m_stream.next_layer(), m_stream.input_buffer(), std::move(*this));
                                         return;
                                     }
 
@@ -334,7 +335,7 @@ namespace Botan {
                                         // "Reading" into a zero-byte buffer will complete immediately.
                                         m_ec = ec;
                                         yield
-                                                                                m_stream.next_layer().async_read_some(boost::asio::mutable_buffer(), std::move(*this));
+                                        SocketWrapper<typename Stream::SocketType>::async_read(m_stream.next_layer(), boost::asio::mutable_buffer(), std::move(*this));
                                         ec = m_ec;
                                     }
 
