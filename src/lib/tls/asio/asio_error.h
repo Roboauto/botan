@@ -83,6 +83,7 @@ namespace Botan {
 
         Botan::BotanExceptionCategory& operator=(const Botan::BotanExceptionCategory& rhs){
             this->message_ = rhs.message_;
+            return *this;
         }
 
         const char* name() const noexcept override {

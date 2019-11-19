@@ -84,3 +84,5 @@ callgrind.*
 !/readme.rst
 !/configure.py
 !/license.txt
+
+.idea/
