@@ -186,7 +186,7 @@ bool Datagram_Handshake_IO::timeout_check()
       return false;
 
    retransmit_last_flight();
-
+   m_last_write = steady_clock_ms(); // Remove when fixed in remote repo
    m_next_timeout = std::min(2 * m_next_timeout, m_max_timeout);
    return true;
    }
