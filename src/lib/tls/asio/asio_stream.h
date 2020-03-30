@@ -256,24 +256,50 @@ namespace Botan {
              *                The equivalent function signature of the handler must be: void(boost::system::error_code)
              * @throws NotImplemented if Connection_Side is not CLIENT
              */
-            template<typename HandshakeHandler>
-            BOOST_ASIO_INITFN_RESULT_TYPE(HandshakeHandler,
-                                          void(boost::system::error_code))
-            async_handshake(Connection_Side side, HandshakeHandler&& handler) {
-                BOOST_ASIO_HANDSHAKE_HANDLER_CHECK(HandshakeHandler, handler) type_check;
+			template<typename HandshakeHandler>
+			BOOST_ASIO_INITFN_RESULT_TYPE(HandshakeHandler,
+				void(boost::system::error_code))
+				async_handshake(Connection_Side side, HandshakeHandler&& handler) {
+				BOOST_ASIO_HANDSHAKE_HANDLER_CHECK(HandshakeHandler, handler) type_check;
 
-                boost::system::error_code ec;
-                setup_native_handle(side, ec);
-                // If ec is set by setup_native_handle, the AsyncHandshakeOperation created below will do nothing but call the
-                // handler with the error_code set appropriately - no need to early return here.
+				boost::system::error_code ec;
+				setup_native_handle(side, ec);
+				// If ec is set by setup_native_handle, the AsyncHandshakeOperation created below will do nothing but call the
+				// handler with the error_code set appropriately - no need to early return here.
 
-                boost::asio::async_completion<HandshakeHandler, void(boost::system::error_code)> init(handler);
 
-                detail::AsyncHandshakeOperation<typename std::decay<HandshakeHandler>::type, Stream>
-                        op{std::move(init.completion_handler), *this, ec};
+				if constexpr (!DTLS) {
+					boost::asio::async_completion<HandshakeHandler, void(boost::system::error_code)> init(handler);
 
-                return init.result.get();
-            }
+					detail::AsyncHandshakeOperation<typename std::decay<HandshakeHandler>::type, Stream>
+						op{ std::move(init.completion_handler), *this, ec };
+
+					return init.result.get();
+				}
+				else {
+					auto interrupt = [this, handler](const boost::system::error_code& errc) {
+						timeoutWatchDog_.cancel();
+						repeatHandshake_.cancel();
+                        aborted_ = true;
+						if (errc == boost::asio::error::operation_aborted) {
+							handler(boost::asio::error::timed_out);
+							return;
+						}
+
+						handler(errc);
+					};
+
+					boost::asio::async_completion<decltype(interrupt), void(boost::system::error_code)> init(interrupt);
+
+					detail::AsyncHandshakeOperation<typename std::decay<decltype(interrupt)>::type, Stream>
+						op{ std::move(init.completion_handler), *this, ec };
+
+					armRepeatHandshake();
+					armWatchdog();
+
+					return init.result.get();
+				}
+			}
 
             //! @throws Not_Implemented
             template<typename ConstBufferSequence, typename BufferedHandshakeHandler>
@@ -698,6 +724,49 @@ namespace Botan {
                 }
             }
 
+			void armRepeatHandshake()
+			{
+				repeatHandshake_.expires_from_now(boost::posix_time::milliseconds(25));
+				repeatHandshake_.async_wait([this](const boost::system::error_code& errc)
+					{
+						if (errc || aborted_)
+						{
+							return;
+						}
+
+						if (native_handle()->timeout_check())
+						{
+							boost::system::error_code ec;
+                            if (has_data_to_send()) {
+                                SocketWrapper<typename SocketType>::async_write(next_layer(), send_buffer(), [this](const boost::system::error_code& errc, size_t bytes_transferred) {
+                                    consume_send_buffer(bytes_transferred);
+                                    if (errc) {
+                                        next_layer().close();
+                                        return;
+                                    }
+                                    armRepeatHandshake();
+                                });
+                                return;
+                            }
+						}
+
+                        armRepeatHandshake();
+					});
+			}
+
+			void armWatchdog() {
+				timeoutWatchDog_.expires_from_now(boost::posix_time::milliseconds(10000));
+				timeoutWatchDog_.async_wait([this](const boost::system::error_code& errc)
+					{
+						if (errc || aborted_)
+						{
+							return;
+						}
+						watchDogTriggered_ = true;
+                        m_nextLayer.close();
+					});
+			}
+
             Context& m_context;
             StreamLayer m_nextLayer;
 
@@ -710,6 +779,11 @@ namespace Botan {
             // Buffer space used to read input intended for the core
             std::vector<uint8_t> m_input_buffer_space;
             const boost::asio::mutable_buffer m_input_buffer;
+
+			bool watchDogTriggered_ = false;
+            bool aborted_ = true;
+			boost::asio::deadline_timer repeatHandshake_{ get_executor() };
+            boost::asio::deadline_timer timeoutWatchDog_{ get_executor() };
         };
 
     }  // namespace TLS
