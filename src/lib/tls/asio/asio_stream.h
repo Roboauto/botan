@@ -269,15 +269,18 @@ namespace Botan {
 
 
 				if constexpr (!DTLS) {
-					boost::asio::async_completion<HandshakeHandler, void(boost::system::error_code)> init(handler);
+					auto inception = std::make_shared<detail::AsyncHandshakeOperation<Stream>>(*this);
 
-					detail::AsyncHandshakeOperation<typename std::decay<HandshakeHandler>::type, Stream>
-						op{ std::move(init.completion_handler), *this, ec };
+					auto interrupt = [this, handler, inception](const boost::system::error_code& errc) {
+						handler(errc);
+					};
 
-					return init.result.get();
+					inception->start(interrupt);
 				}
 				else {
-					auto interrupt = [this, handler](const boost::system::error_code& errc) {
+                    auto inception = std::make_shared<detail::AsyncHandshakeOperation<Stream>>(*this);
+
+					auto interrupt = [this, handler, inception](const boost::system::error_code& errc) {
 						timeoutWatchDog_.cancel();
 						repeatHandshake_.cancel();
                         aborted_ = true;
@@ -289,15 +292,10 @@ namespace Botan {
 						handler(errc);
 					};
 
-					boost::asio::async_completion<decltype(interrupt), void(boost::system::error_code)> init(interrupt);
+                    inception->start(interrupt);
 
-					detail::AsyncHandshakeOperation<typename std::decay<decltype(interrupt)>::type, Stream>
-						op{ std::move(init.completion_handler), *this, ec };
-
-					armRepeatHandshake();
+					armRepeatHandshake(inception);
 					armWatchdog();
-
-					return init.result.get();
 				}
 			}
 
@@ -535,7 +533,7 @@ namespace Botan {
             template<class H, class S, class A> friend
             class detail::AsyncWriteOperation;
 
-            template<class H, class S, class A> friend
+            template<class S> friend
             class detail::AsyncHandshakeOperation;
 
             /**
@@ -724,10 +722,11 @@ namespace Botan {
                 }
             }
 
-			void armRepeatHandshake()
+
+			void armRepeatHandshake(const std::shared_ptr<detail::AsyncHandshakeOperation<Stream>>& aho)
 			{
 				repeatHandshake_.expires_from_now(boost::posix_time::milliseconds(25));
-				repeatHandshake_.async_wait([this](const boost::system::error_code& errc)
+				repeatHandshake_.async_wait([this, aho](const boost::system::error_code& errc)
 					{
 						if (errc || aborted_)
 						{
@@ -737,20 +736,27 @@ namespace Botan {
 						if (native_handle()->timeout_check())
 						{
 							boost::system::error_code ec;
-                            if (has_data_to_send()) {
-                                SocketWrapper<typename SocketType>::async_write(next_layer(), send_buffer(), [this](const boost::system::error_code& errc, size_t bytes_transferred) {
+                            if (has_data_to_send() && !native_handle()->is_active() && !aho->writing_) {
+                                aho->writing_ = true;
+                                SocketWrapper<SocketType>::async_write(next_layer(), send_buffer(),
+                                    [this, aho](const boost::system::error_code& errc, size_t bytes_transferred) {
                                     consume_send_buffer(bytes_transferred);
+                                    aho->writing_ = false;
+                                    if (aho->wantToWrite_) {
+                                        aho->wantToWrite_ = false;
+                                        aho->operator()(errc, 0);
+                                    }
                                     if (errc) {
                                         next_layer().close();
                                         return;
                                     }
-                                    armRepeatHandshake();
+                                    armRepeatHandshake(aho);
                                 });
                                 return;
                             }
 						}
 
-                        armRepeatHandshake();
+                        armRepeatHandshake(aho);
 					});
 			}
 
@@ -781,7 +787,7 @@ namespace Botan {
             const boost::asio::mutable_buffer m_input_buffer;
 
 			bool watchDogTriggered_ = false;
-            bool aborted_ = true;
+            bool aborted_ = false;
 			boost::asio::deadline_timer repeatHandshake_{ get_executor() };
             boost::asio::deadline_timer timeoutWatchDog_{ get_executor() };
         };

@@ -238,8 +238,9 @@ namespace Botan {
                 boost::system::error_code m_ec;
             };
 
-            template<class Handler, class Stream, class Allocator = std::allocator<void>>
-            class AsyncHandshakeOperation : public AsyncBase<Handler, typename Stream::executor_type, Allocator> {
+            template<class Stream
+            >
+            class AsyncHandshakeOperation {
             public:
                 /**
                  * Construct and invoke an AsyncHandshakeOperation.
@@ -248,108 +249,135 @@ namespace Botan {
                  * @param stream The stream from which the data will be read
                  * @param ec Optional error code; used to report an error to the handler function.
                  */
-                template<class HandlerT>
+
                 AsyncHandshakeOperation(
-                        HandlerT&& handler,
                         Stream& stream,
                         const boost::system::error_code& ec = {})
-                        : AsyncBase<Handler, typename Stream::executor_type, Allocator>(
-                        std::forward<HandlerT>(handler),
-                        stream.get_executor()), m_stream(stream) {
-                    this->operator()(ec, std::size_t(0), false);
+                        : m_stream(stream) {
+                    
                 }
 
-                AsyncHandshakeOperation(AsyncHandshakeOperation&&) = default;
+                AsyncHandshakeOperation(AsyncHandshakeOperation&& other) = default;
+                
+                template<class HandlerT>
+                void start(HandlerT&& handler) {
+                    m_handler = handler;
+                    this->operator()({}, std::size_t(0), false);
+                }
 
-                void operator()(boost::system::error_code ec, std::size_t bytesTransferred, bool isContinuation = true) {
-                    reenter(this) {
-                                    using AWO = AsyncWriteOperation<
-                                            AsyncHandshakeOperation<typename std::decay<Handler>::type, Stream, Allocator>,
-                                            Stream,
-                                            Allocator>;
-                                    if (bytesTransferred > 0) {
-                                        // Provide encrypted TLS data received from the network to TLS::Channel for decryption
-                                        boost::asio::const_buffer read_buffer{m_stream.input_buffer().data(), bytesTransferred};
-                                        try {
-                                            m_stream.native_handle()->received_data(
-                                                    static_cast<const uint8_t*>(read_buffer.data()), read_buffer.size()
-                                                                                   );
+                void write() {
+					if (writing_) {
+						wantToWrite_ = true;
+						return;
+					}
+					writing_ = true;
+					SocketWrapper<typename Stream::SocketType>::async_write(
+						m_stream.next_layer(), m_stream.send_buffer(),
+						[this](const boost::system::error_code& errc, size_t transferred) {
+                            if (errorState_) {
+                                m_stream.native_handle()->close();
+                            }
+							writing_ = false;
+							m_stream.consume_send_buffer(transferred);
+							this->operator()(errc, 0);
+						});
+                }
 
-                                            if (m_stream.m_core.m_isAlerted) {
-                                                if(m_stream.m_core.m_alert.is_fatal()){
-                                                    m_has_exception_cat = true;
-                                                    ec = boost::system::error_code(m_stream.m_core.m_alert.type(), BotanAlertCategory());
-                                                    m_last_cat = BotanExceptionCategory(ec.message());
-                                                    m_stream.native_handle()->close();
-                                                    AWO op{std::move(*this), m_stream, 0};
-                                                    return;
-                                                }else{
-                                                    m_stream.native_handle()->send_alert(m_stream.m_core.m_alert);
-                                                    m_stream.m_core.m_isAlerted = false;
-                                                }
+                void operator()(boost::system::error_code ec, std::size_t bytesTransferred, bool isContinuation = true) {             	
+                    if (bytesTransferred > 0) {
+                        // Provide encrypted TLS data received from the network to TLS::Channel for decryption
+                        boost::asio::const_buffer read_buffer{m_stream.input_buffer().data(), bytesTransferred};
+                        try {
+                            m_stream.native_handle()->received_data(
+                                    static_cast<const uint8_t*>(read_buffer.data()), read_buffer.size()
+                                                                    );
 
-                                            }
-                                        }
-                                        catch (const TLS_Exception& e) {
-                                            m_has_exception_cat = true;
-                                            m_last_cat = BotanExceptionCategory(e.what());
-                                            m_stream.native_handle()->close();
-                                            AWO op{std::move(*this), m_stream, 0};
-                                            return;
-                                        }
-                                        catch (const Botan::Exception& e) {
-                                            m_has_exception_cat = true;
-                                            m_last_cat = BotanExceptionCategory(e.what());
-                                            m_stream.native_handle()->close();
-                                            AWO op{std::move(*this), m_stream, 0};
-                                            return;
-                                        }
-                                        catch (...) {
-                                            m_has_exception_cat = true;
-                                            m_last_cat = BotanExceptionCategory("Unknown exception");
-                                            m_stream.native_handle()->close();
-                                            AWO op{std::move(*this), m_stream, 0};
-                                            return;
-                                        }
-                                    }
-
-                                    if (m_stream.has_data_to_send() && !ec) {
-                                        // Write encrypted TLS data provided by the TLS::Channel on the wire
-
-                                        // Note: we construct `AsyncWriteOperation` with 0 as its last parameter (`plainBytesTransferred`). This
-                                        // operation will eventually call `*this` as its own handler, passing the 0 back to this call operator.
-                                        // This is necessary because the check of `bytesTransferred > 0` assumes that `bytesTransferred` bytes
-                                        // were just read and are available in input_buffer for further processing.
-                                        AWO op{std::move(*this), m_stream, 0};
-                                        return;
-                                    }
-
-                                    if (!m_stream.native_handle()->is_active() && !ec && !m_has_exception_cat) {
-                                        // Read more encrypted TLS data from the network
-                                        SocketWrapper<typename Stream::SocketType>::async_read(m_stream.next_layer(), m_stream.input_buffer(), std::move(*this));
-                                        return;
-                                    }
-
-                                    if (!isContinuation) {
-                                        // Make sure the handler is not called without an intermediate initiating function.
-                                        // "Reading" into a zero-byte buffer will complete immediately.
-                                        m_ec = ec;
-                                        yield
-                                        SocketWrapper<typename Stream::SocketType>::async_read(m_stream.next_layer(), boost::asio::mutable_buffer(), std::move(*this));
-                                        ec = m_ec;
-                                    }
-
-                                    if (m_has_exception_cat) {
-                                        boost::system::error_code errc(1, m_last_cat);
-                                        this->complete_now(errc);
-                                        m_stream.next_layer().close();
-                                    } else {
-                                        this->complete_now(ec);
-                                    }
+                            if (m_stream.m_core.m_isAlerted) {
+                                if(m_stream.m_core.m_alert.is_fatal()){
+                                    m_has_exception_cat = true;
+                                    ec = boost::system::error_code(m_stream.m_core.m_alert.type(), BotanAlertCategory());
+                                    m_last_cat = BotanExceptionCategory(ec.message());
+                                    errorState_ = true;
+                                    write();
+                                    return;
+                                }else{
+                                    m_stream.native_handle()->send_alert(m_stream.m_core.m_alert);
+                                    m_stream.m_core.m_isAlerted = false;
                                 }
+
+                            }
+                        }
+                        catch (const TLS_Exception& e) {
+                            m_has_exception_cat = true;
+                            m_last_cat = BotanExceptionCategory(e.what()); 
+							errorState_ = true;
+							write();
+                            return;
+                        }
+                        catch (const Botan::Exception& e) {
+                            m_has_exception_cat = true;
+                            m_last_cat = BotanExceptionCategory(e.what());
+							errorState_ = true;
+							write();
+                            return;
+                        }
+                        catch (...) {
+                            m_has_exception_cat = true;
+							m_last_cat = BotanExceptionCategory("Unknown exception");
+							errorState_ = true;
+							write();
+                            return;
+                        }
+                    }
+
+                    if (m_stream.has_data_to_send() && !ec) {
+                        // Write encrypted TLS data provided by the TLS::Channel on the wire
+
+                        // Note: we construct `AsyncWriteOperation` with 0 as its last parameter (`plainBytesTransferred`). This
+                        // operation will eventually call `*this` as its own handler, passing the 0 back to this call operator.
+                        // This is necessary because the check of `bytesTransferred > 0` assumes that `bytesTransferred` bytes
+                        // were just read and are available in input_buffer for further processing.
+						write();
+                        return;
+                    }
+
+                    if (!m_stream.native_handle()->is_active() && !ec && !m_has_exception_cat) {
+                        // Read more encrypted TLS data from the network
+						SocketWrapper<typename Stream::SocketType>::async_read(m_stream.next_layer(), m_stream.input_buffer(), 
+                            [this](const boost::system::error_code& errc, size_t transferred) {                                
+								this->operator()(errc, transferred);
+							});
+                        return;
+                    }
+
+                    if (!isContinuation) {
+                        // Make sure the handler is not called without an intermediate initiating function.
+                        // "Reading" into a zero-byte buffer will complete immediately.
+                        m_ec = ec;
+
+                                 
+						SocketWrapper<typename Stream::SocketType>::async_read(m_stream.next_layer(), boost::asio::mutable_buffer(),
+							[this](const boost::system::error_code& errc, size_t transferred) {
+								this->operator()(errc, transferred);
+							});
+                        ec = m_ec;
+                    }
+
+                    if (m_has_exception_cat) {
+                        boost::system::error_code errc(1, m_last_cat);
+                        m_handler(errc);
+                        m_stream.next_layer().close();
+                    } else {
+                        m_handler(ec);
+                    }
+                                
                 }
 
+                bool writing_ = false;
+                bool wantToWrite_ = false;
             private:
+                bool errorState_ = false;
+                std::function<void(const boost::system::error_code&)> m_handler;
                 Stream& m_stream;
                 BotanExceptionCategory m_last_cat{""};
                 bool m_has_exception_cat = false;
