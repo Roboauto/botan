@@ -341,13 +341,25 @@ namespace Botan {
                         return;
                     }
 
-                    if (!m_stream.native_handle()->is_active() && !ec && !m_has_exception_cat) {
-                        // Read more encrypted TLS data from the network
-						SocketWrapper<typename Stream::SocketType>::async_read(m_stream.next_layer(), m_stream.input_buffer(), 
-                            [this](const boost::system::error_code& errc, size_t transferred) {                                
-								this->operator()(errc, transferred);
-							});
-                        return;
+                    if (isDTLS && m_stream.isServer_) {
+						if (!m_stream.m_core.isClientSending_ && !ec && !m_has_exception_cat) {
+							// Read more encrypted TLS data from the network
+							SocketWrapper<typename Stream::SocketType>::async_read(m_stream.next_layer(), m_stream.input_buffer(),
+								[this](const boost::system::error_code& errc, size_t transferred) {
+									this->operator()(errc, transferred);
+								});
+							return;
+						}
+                    }
+                    else {
+						if (!m_stream.native_handle()->is_active() && !ec && !m_has_exception_cat) {
+							// Read more encrypted TLS data from the network
+							SocketWrapper<typename Stream::SocketType>::async_read(m_stream.next_layer(), m_stream.input_buffer(),
+								[this](const boost::system::error_code& errc, size_t transferred) {
+									this->operator()(errc, transferred);
+								});
+							return;
+						}
                     }
 
                     if (!isContinuation) {
@@ -375,6 +387,7 @@ namespace Botan {
 
                 bool writing_ = false;
                 bool wantToWrite_ = false;
+                bool isDTLS = false;
             private:
                 bool errorState_ = false;
                 std::function<void(const boost::system::error_code&)> m_handler;
