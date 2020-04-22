@@ -271,8 +271,9 @@ namespace Botan {
 				if constexpr (!DTLS) {
 					auto inception = std::make_shared<detail::AsyncHandshakeOperation<Stream>>(*this);
 
-					auto interrupt = [this, handler, inception](const boost::system::error_code& errc) {
+					auto interrupt = [this, handler, inception](const boost::system::error_code& errc) mutable {
 						handler(errc);
+                        inception = nullptr;
 					};
 
 					inception->start(interrupt);
@@ -280,7 +281,7 @@ namespace Botan {
 				else {
                     auto inception = std::make_shared<detail::AsyncHandshakeOperation<Stream>>(*this);
 
-					auto interrupt = [this, handler, inception](const boost::system::error_code& errc) {
+					auto interrupt = [this, handler, inception](const boost::system::error_code& errc) mutable {
 						timeoutWatchDog_.cancel();
 						repeatHandshake_.cancel();
                         aborted_ = true;
@@ -290,6 +291,7 @@ namespace Botan {
 						}
 
 						handler(errc);
+                        inception = nullptr;
 					};
 
                     inception->start(interrupt);
