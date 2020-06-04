@@ -128,6 +128,14 @@ namespace Botan {
                 return m_native_handle.get();
             }
 
+            size_t available() const {
+              return m_receive_buffer.size();
+            }
+
+            size_t available(boost::system::error_code&) const {
+              return m_receive_buffer.size();
+            }
+
             //! @}
             //! \name configuration and callback setters
             //! @{
