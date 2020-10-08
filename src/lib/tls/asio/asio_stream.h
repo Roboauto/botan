@@ -300,7 +300,7 @@ namespace Botan {
 
 						handler(errc);
 					};
-
+                    inception->isDTLS = true;
                     inception->start(interrupt);
 
 					armRepeatHandshake(inception);
@@ -569,6 +569,10 @@ namespace Botan {
                 }
 
                 void tls_record_received(uint64_t, const uint8_t data[], std::size_t size) override {
+                    if constexpr (DTLS) {
+                        isClientSending_ = true;
+                    }
+
                     m_receive_buffer.commit(
                             boost::asio::buffer_copy(m_receive_buffer.prepare(size), boost::asio::const_buffer(data, size))
                                            );
@@ -607,6 +611,7 @@ namespace Botan {
 
                 Botan::TLS::Alert m_alert{};
                 bool m_isAlerted = false;
+                bool isClientSending_ = false;
                 boost::beast::flat_buffer& m_receive_buffer;
                 boost::beast::flat_buffer& m_send_buffer;
                 Context& m_tls_context;
@@ -686,6 +691,7 @@ namespace Botan {
                                        ver
                                        ));
                 } else {
+                    isServer_ = true;
                     m_native_handle = std::unique_ptr<Server>(
                             new Server(m_core,
                                        m_context.m_session_manager,
@@ -745,7 +751,15 @@ namespace Botan {
 						if (native_handle()->timeout_check())
 						{
 							boost::system::error_code ec;
-                            if (has_data_to_send() && !native_handle()->is_active() && !aho->writing_) {
+                            bool check = false;
+                            if (isServer_) {
+                                check = !m_core.isClientSending_;
+                            }
+                            else {
+                                check = !native_handle()->is_active();
+                            }
+
+                            if (has_data_to_send() && check && !aho->writing_) {
                                 aho->writing_ = true;
                                 SocketWrapper<SocketType>::async_write(next_layer(), send_buffer(),
                                     [this, aho](const boost::system::error_code& errc, size_t bytes_transferred) {
@@ -797,6 +811,7 @@ namespace Botan {
 
 			bool watchDogTriggered_ = false;
             bool aborted_ = false;
+            bool isServer_ = false;
 			boost::asio::deadline_timer repeatHandshake_{ get_executor() };
             boost::asio::deadline_timer timeoutWatchDog_{ get_executor() };
         };
