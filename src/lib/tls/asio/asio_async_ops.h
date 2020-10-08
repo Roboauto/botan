@@ -241,6 +241,8 @@ namespace Botan {
             template<class Stream
             >
             class AsyncHandshakeOperation {
+            private:
+                static inline boost::asio::thread_pool handshakeThreadPool_{ std::thread::hardware_concurrency() ? std::thread::hardware_concurrency() : 16 };
             public:
                 /**
                  * Construct and invoke an AsyncHandshakeOperation.
@@ -286,48 +288,61 @@ namespace Botan {
                 void operator()(boost::system::error_code ec, std::size_t bytesTransferred, bool isContinuation = true) {             	
                     if (bytesTransferred > 0) {
                         // Provide encrypted TLS data received from the network to TLS::Channel for decryption
-                        boost::asio::const_buffer read_buffer{m_stream.input_buffer().data(), bytesTransferred};
-                        try {
-                            m_stream.native_handle()->received_data(
-                                    static_cast<const uint8_t*>(read_buffer.data()), read_buffer.size()
-                                                                    );
+                        auto work = std::make_shared<boost::asio::executor_work_guard<typename Stream::executor_type>>(m_stream.get_executor());
+                        boost::asio::post(handshakeThreadPool_, [this, bytesTransferred, work]() {
+                            std::function<void()> result;
+							try {
+                                boost::asio::const_buffer read_buffer{ m_stream.input_buffer().data(), bytesTransferred };
+								m_stream.native_handle()->received_data(
+									static_cast<const uint8_t*>(read_buffer.data()), read_buffer.size()
+								);
 
-                            if (m_stream.m_core.m_isAlerted) {
-                                if(m_stream.m_core.m_alert.is_fatal()){
+                                result = [this]() {
+                                    if (m_stream.m_core.m_isAlerted) {
+                                        if (m_stream.m_core.m_alert.is_fatal()) {
+                                            m_has_exception_cat = true;
+                                            boost::system::error_code ecTmp = boost::system::error_code(m_stream.m_core.m_alert.type(), BotanAlertCategory());
+                                            m_last_cat = BotanExceptionCategory(ecTmp.message());
+                                            errorState_ = true;
+                                            write();
+                                            return;
+                                        }
+                                        else {
+                                            m_stream.native_handle()->send_alert(m_stream.m_core.m_alert);
+                                            m_stream.m_core.m_isAlerted = false;
+                                        }
+                                    };
+                                    this->operator()({}, 0); // Continue
+                                };
+							}
+							catch (const TLS_Exception& e) {
+                                result = [this, e]() {
                                     m_has_exception_cat = true;
-                                    ec = boost::system::error_code(m_stream.m_core.m_alert.type(), BotanAlertCategory());
-                                    m_last_cat = BotanExceptionCategory(ec.message());
+                                    m_last_cat = BotanExceptionCategory(e.what());
                                     errorState_ = true;
                                     write();
-                                    return;
-                                }else{
-                                    m_stream.native_handle()->send_alert(m_stream.m_core.m_alert);
-                                    m_stream.m_core.m_isAlerted = false;
-                                }
-
-                            }
-                        }
-                        catch (const TLS_Exception& e) {
-                            m_has_exception_cat = true;
-                            m_last_cat = BotanExceptionCategory(e.what()); 
-							errorState_ = true;
-							write();
-                            return;
-                        }
-                        catch (const Botan::Exception& e) {
-                            m_has_exception_cat = true;
-                            m_last_cat = BotanExceptionCategory(e.what());
-							errorState_ = true;
-							write();
-                            return;
-                        }
-                        catch (...) {
-                            m_has_exception_cat = true;
-							m_last_cat = BotanExceptionCategory("Unknown exception");
-							errorState_ = true;
-							write();
-                            return;
-                        }
+                                };
+							}
+							catch (const Botan::Exception& e) {
+                                result = [this, e]() {
+                                    m_has_exception_cat = true;
+                                    m_last_cat = BotanExceptionCategory(e.what());
+                                    errorState_ = true;
+                                    write();
+                                };
+							}
+							catch (...) {
+                                result = [this]() {
+                                    m_has_exception_cat = true;
+                                    m_last_cat = BotanExceptionCategory("Unknown exception");
+                                    errorState_ = true;
+                                    write();
+                                };
+							}
+                            boost::asio::post(m_stream.get_executor(), result); // Post the post process back to io_context
+                        });
+                        
+                        return;
                     }
 
                     if (m_stream.has_data_to_send() && !ec) {
