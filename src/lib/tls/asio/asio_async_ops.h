@@ -1,7 +1,7 @@
 /*
 * Helpers for TLS ASIO Stream
-* (C) 2018-2019 Jack Lloyd
-*     2018-2019 Hannes Rantzsch, Tim Oesterreich, Rene Meusel
+* (C) 2018-2020 Jack Lloyd
+*     2018-2020 Hannes Rantzsch, Tim Oesterreich, Rene Meusel
 *
 * Botan is released under the Simplified BSD License (see license.txt)
 */
@@ -142,24 +142,18 @@ class AsyncReadOperation : public AsyncBase<Handler, typename Stream::executor_t
                {
                // We have received encrypted data from the network, now hand it to TLS::Channel for decryption.
                boost::asio::const_buffer read_buffer{m_stream.input_buffer().data(), bytes_transferred};
-               try
-                  {
-                  m_stream.native_handle()->received_data(
-                     static_cast<const uint8_t*>(read_buffer.data()), read_buffer.size()
-                  );
-                  }
-               catch(const TLS_Exception& e)
-                  {
-                  ec = e.type();
-                  }
-               catch(const Botan::Exception& e)
-                  {
-                  ec = e.error_type();
-                  }
-               catch(...)
-                  {
-                  ec = Botan::ErrorType::Unknown;
-                  }
+               m_stream.process_encrypted_data(read_buffer, ec);
+               }
+
+            if (m_stream.shutdown_received())
+               {
+               // we just received a 'close_notify' from the peer and don't expect any more data
+               ec = boost::asio::error::eof;
+               }
+            else if (ec == boost::asio::error::eof)
+               {
+               // we did not expect this disconnection from the peer
+               ec = StreamError::StreamTruncated;
                }
 
             if(!m_stream.has_received_data() && !ec && boost::asio::buffer_size(m_buffers) > 0)
@@ -240,6 +234,12 @@ class AsyncWriteOperation : public AsyncBase<Handler, typename Stream::executor_
                SocketWrapper<typename Stream::SocketType>::async_write(m_stream.next_layer(), m_stream.send_buffer(),
                      std::move(*this));
                return;
+               }
+
+            if (ec == boost::asio::error::eof && !m_stream.shutdown_received())
+               {
+               // transport layer was closed by peer without receiving 'close_notify'
+               ec = StreamError::StreamTruncated;
                }
 
             if(!isContinuation)
@@ -325,16 +325,22 @@ class AsyncHandshakeOperation
             {
             // Provide encrypted TLS data received from the network to TLS::Channel for decryption
             auto work = std::make_shared<boost::asio::executor_work_guard<typename Stream::executor_type>>(m_stream.get_executor());
-            boost::asio::post(handshakeThreadPool_, [this, bytesTransferred, work]()
+            boost::asio::post(handshakeThreadPool_, [this, bytesTransferred, work, ec] () mutable
                {
                std::function<void()> result;
                try
                   {
-                  boost::asio::const_buffer read_buffer{ m_stream.input_buffer().data(), bytesTransferred };
-                  m_stream.native_handle()->received_data(
-                     static_cast<const uint8_t*>(read_buffer.data()), read_buffer.size()
-                  );
+                    if(ec == boost::asio::error::eof)
+                    {
+                      m_ec = StreamError::StreamTruncated;
+                    }
 
+                    if(bytesTransferred > 0 && !ec)
+                    {
+                      // Provide encrypted TLS data received from the network to TLS::Channel for decryption
+                      boost::asio::const_buffer read_buffer {m_stream.input_buffer().data(), bytesTransferred};
+                      m_stream.process_encrypted_data(read_buffer, m_ec);
+                    }
                   result = [this]()
                      {
                      if(m_stream.m_core.m_isAlerted)
@@ -407,7 +413,7 @@ class AsyncHandshakeOperation
 
          if(isDTLS && m_stream.isServer_)
             {
-            if(!m_stream.m_core.isClientSending_ && !ec && !m_has_exception_cat)
+            if(!m_stream.m_core.isClientSending() && !ec && !m_has_exception_cat)
                {
                // Read more encrypted TLS data from the network
                SocketWrapper<typename Stream::SocketType>::async_read(m_stream.next_layer(), m_stream.input_buffer(),

@@ -18,7 +18,8 @@ namespace Botan_FFI {
 
 int ffi_error_exception_thrown(const char* func_name, const char* exn, int rc)
    {
-   if(Botan::OS::read_env_variable("BOTAN_FFI_PRINT_EXCEPTIONS") != nullptr)
+   std::string val;
+   if(Botan::OS::read_env_variable(val, "BOTAN_FFI_PRINT_EXCEPTIONS") == true && val != "")
       {
       std::fprintf(stderr, "in %s exception '%s' returning %d\n", func_name, exn, rc);
       }
@@ -199,6 +200,10 @@ uint32_t botan_ffi_api_version()
 
 int botan_ffi_supports_api(uint32_t api_version)
    {
+   // This is the API introduced in 2.13
+   if(api_version == 20191214)
+      return BOTAN_FFI_SUCCESS;
+
    // This is the API introduced in 2.8
    if(api_version == 20180713)
       return BOTAN_FFI_SUCCESS;

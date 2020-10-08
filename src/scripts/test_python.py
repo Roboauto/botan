@@ -17,7 +17,7 @@ def hex_decode(buf):
     return binascii.unhexlify(buf.encode('ascii'))
 
 class BotanPythonTests(unittest.TestCase):
-    # pylint: disable=too-many-public-methods
+    # pylint: disable=too-many-public-methods,too-many-locals
 
     def test_version(self):
         version_str = botan2.version_string()
@@ -351,23 +351,28 @@ ofvkP1EDmpx50fHLawIDAQAB
         self.assertEqual(pub.get_field('public_x'), priv.get_field('public_x'))
         self.assertEqual(pub.get_field('public_y'), priv.get_field('public_y'))
 
-        signer = botan2.PKSign(priv, hash_fn)
+        signer = botan2.PKSign(priv, hash_fn, True)
         signer.update(msg)
         signature = signer.finish(rng)
 
         verifier = botan2.PKVerify(pub, hash_fn)
+        verifier.update(msg)
+        #fails because DER/not-DER mismatch
+        self.assertFalse(verifier.check_signature(signature))
+
+        verifier = botan2.PKVerify(pub, hash_fn, True)
         verifier.update(msg)
         self.assertTrue(verifier.check_signature(signature))
 
         pub_x = pub.get_field('public_x')
         pub_y = priv.get_field('public_y')
         pub2 = botan2.PublicKey.load_ecdsa(group, pub_x, pub_y)
-        verifier = botan2.PKVerify(pub2, hash_fn)
+        verifier = botan2.PKVerify(pub2, hash_fn, True)
         verifier.update(msg)
         self.assertTrue(verifier.check_signature(signature))
 
         priv2 = botan2.PrivateKey.load_ecdsa(group, priv.get_field('x'))
-        signer = botan2.PKSign(priv2, hash_fn)
+        signer = botan2.PKSign(priv2, hash_fn, True)
         # sign empty message
         signature = signer.finish(rng)
 
@@ -442,6 +447,7 @@ ofvkP1EDmpx50fHLawIDAQAB
             self.assertEqual(a_pem, new_a.to_pem())
 
     def test_certs(self):
+        # pylint: disable=too-many-statements
         cert = botan2.X509Cert(filename="src/tests/data/x509/ecc/CSCA.CSCA.csca-germany.1.crt")
         pubkey = cert.subject_public_key()
 
@@ -498,8 +504,30 @@ ofvkP1EDmpx50fHLawIDAQAB
         self.assertEqual(botan2.X509Cert.validation_status(3000), 'Certificate issuer not found')
         self.assertEqual(botan2.X509Cert.validation_status(4008), 'Certificate does not match provided name')
 
+        rootcrl = botan2.X509CRL("src/tests/data/x509/nist/root.crl")
+
+        end01 = botan2.X509Cert("src/tests/data/x509/nist/test01/end.crt")
+        self.assertEqual(end01.verify([], [root], required_strength=80, crls=[rootcrl]), 0)
+
+        int20 = botan2.X509Cert("src/tests/data/x509/nist/test20/int.crt")
+        end20 = botan2.X509Cert("src/tests/data/x509/nist/test20/end.crt")
+        int20crl = botan2.X509CRL("src/tests/data/x509/nist/test20/int.crl")
+
+        self.assertEqual(end20.verify([int20], [root], required_strength=80, crls=[int20crl, rootcrl]), 5000)
+        self.assertEqual(botan2.X509Cert.validation_status(5000), 'Certificate is revoked')
+
+        int21 = botan2.X509Cert("src/tests/data/x509/nist/test21/int.crt")
+        end21 = botan2.X509Cert("src/tests/data/x509/nist/test21/end.crt")
+        int21crl = botan2.X509CRL("src/tests/data/x509/nist/test21/int.crl")
+        self.assertEqual(end21.verify([int21], [root], required_strength=80, crls=[int21crl, rootcrl]), 5000)
+
+        self.assertTrue(int20.is_revoked(rootcrl))
+        self.assertFalse(int04_1.is_revoked(rootcrl))
+        self.assertTrue(end21.is_revoked(int21crl))
+
+
     def test_mpi(self):
-        # pylint: disable=too-many-statements
+        # pylint: disable=too-many-statements,too-many-locals
         z = botan2.MPI()
         self.assertEqual(z.bit_count(), 0)
         five = botan2.MPI('5')
@@ -507,11 +535,13 @@ ofvkP1EDmpx50fHLawIDAQAB
         big = botan2.MPI('0x85839682368923476892367235')
         self.assertEqual(big.bit_count(), 104)
         small = botan2.MPI(0xDEADBEEF)
+        radix = botan2.MPI("DEADBEEF", 16)
 
         self.assertEqual(hex_encode(small.to_bytes()), "deadbeef")
         self.assertEqual(hex_encode(big.to_bytes()), "85839682368923476892367235")
 
         self.assertEqual(int(small), 0xDEADBEEF)
+        self.assertEqual(int(radix), int(small))
 
         self.assertEqual(int(small >> 16), 0xDEAD)
 
@@ -576,6 +606,20 @@ ofvkP1EDmpx50fHLawIDAQAB
 
         p = inv.pow_mod(botan2.MPI(46), mod)
         self.assertEqual(int(p), 42)
+
+        one = botan2.MPI(1)
+        twelve = botan2.MPI("C", 16)
+        eight = botan2.MPI(8)
+
+        mul = twelve.mod_mul(eight, inv)
+        self.assertEqual(int(mul), 27)
+
+        gcd = one.gcd(one)
+        self.assertEqual(one, gcd)
+        gcd = one.gcd(twelve)
+        self.assertEqual(one, gcd)
+        gcd = twelve.gcd(eight)
+        self.assertEqual(4, int(gcd))
 
     def test_mpi_random(self):
         rng = botan2.RandomNumberGenerator()

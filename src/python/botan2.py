@@ -26,7 +26,7 @@ from time import strptime, mktime, time as system_time
 from binascii import hexlify
 from datetime import datetime
 
-BOTAN_FFI_VERSION = 20180713
+BOTAN_FFI_VERSION = 20191214
 
 #
 # Base exception for all exceptions raised from this module
@@ -61,7 +61,7 @@ def _load_botan_dll(expected_version):
     else:
         # assumed to be some Unix/Linux system
         possible_dll_names.append('libbotan-2.so')
-        possible_dll_names += ['libbotan-2.so.%d' % (v) for v in reversed(range(8, 16))]
+        possible_dll_names += ['libbotan-2.so.%d' % (v) for v in reversed(range(13, 20))]
 
     for dll_name in possible_dll_names:
         try:
@@ -382,6 +382,14 @@ def _set_prototypes(dll):
 
     dll.botan_x509_cert_validation_status.argtypes = [c_int]
     dll.botan_x509_cert_validation_status.restype = c_char_p
+
+    # X509 CRL
+    ffi_api(dll.botan_x509_crl_load, [c_void_p, c_char_p, c_size_t])
+    ffi_api(dll.botan_x509_crl_load_file, [c_void_p, c_char_p])
+    ffi_api(dll.botan_x509_crl_destroy, [c_void_p])
+    ffi_api(dll.botan_x509_is_revoked, [c_void_p, c_void_p], [-1])
+    ffi_api(dll.botan_x509_cert_verify_with_crl,
+            [POINTER(c_int), c_void_p, c_void_p, c_size_t, c_void_p, c_size_t, c_void_p, c_size_t, c_char_p, c_size_t, c_char_p, c_uint64])
 
     ffi_api(dll.botan_key_wrap3394,
             [c_char_p, c_size_t, c_char_p, c_size_t, c_char_p, POINTER(c_size_t)])
@@ -1162,9 +1170,9 @@ class PKDecrypt(object):
         return outbuf.raw[0:int(outbuf_sz.value)]
 
 class PKSign(object): # pylint: disable=invalid-name
-    def __init__(self, key, padding):
+    def __init__(self, key, padding, der=False):
         self.__obj = c_void_p(0)
-        flags = c_uint32(0) # always zero in this ABI
+        flags = c_uint32(1) if der else c_uint32(0)
         _DLL.botan_pk_op_sign_create(byref(self.__obj), key.handle_(), _ctype_str(padding), flags)
 
     def __del__(self):
@@ -1181,9 +1189,9 @@ class PKSign(object): # pylint: disable=invalid-name
         return outbuf.raw[0:int(outbuf_sz.value)]
 
 class PKVerify(object):
-    def __init__(self, key, padding):
+    def __init__(self, key, padding, der=False):
         self.__obj = c_void_p(0)
-        flags = c_uint32(0) # always zero in this ABI
+        flags = c_uint32(1) if der else c_uint32(0)
         _DLL.botan_pk_op_verify_create(byref(self.__obj), key.handle_(), _ctype_str(padding), flags)
 
     def __del__(self):
@@ -1256,22 +1264,28 @@ def mceies_decrypt(mce, aead, ct, ad):
                                                             b, bl))
 
 
+def _load_buf_or_file(filename, buf, file_fn, buf_fn):
+    if filename is None and buf is None:
+        raise BotanException("No filename or buf given")
+    if filename is not None and buf is not None:
+        raise BotanException("Both filename and buf given")
+
+    obj = c_void_p(0)
+
+    if filename is not None:
+        file_fn(byref(obj), _ctype_str(filename))
+    elif buf is not None:
+        buf_fn(byref(obj), _ctype_bits(buf), len(buf))
+
+    return obj
+
+
 #
 # X.509 certificates
 #
 class X509Cert(object): # pylint: disable=invalid-name
     def __init__(self, filename=None, buf=None):
-        if filename is None and buf is None:
-            raise BotanException("No filename or buf given")
-        if filename is not None and buf is not None:
-            raise BotanException("Both filename and buf given")
-
-        if filename is not None:
-            self.__obj = c_void_p(0)
-            _DLL.botan_x509_cert_load_file(byref(self.__obj), _ctype_str(filename))
-        elif buf is not None:
-            self.__obj = c_void_p(0)
-            _DLL.botan_x509_cert_load(byref(self.__obj), _ctype_bits(buf), len(buf))
+        self.__obj = _load_buf_or_file(filename, buf, _DLL.botan_x509_cert_load_file, _DLL.botan_x509_cert_load)
 
     def __del__(self):
         _DLL.botan_x509_cert_destroy(self.__obj)
@@ -1376,7 +1390,7 @@ class X509Cert(object): # pylint: disable=invalid-name
         rc = _DLL.botan_x509_cert_allowed_usage(self.__obj, c_uint(usage))
         return rc == 0
 
-    def get_obj(self):
+    def handle_(self):
         return self.__obj
 
     def verify(self,
@@ -1385,39 +1399,83 @@ class X509Cert(object): # pylint: disable=invalid-name
                trusted_path=None,
                required_strength=0,
                hostname=None,
-               reference_time=0):
+               reference_time=0,
+               crls=None):
+        #pylint: disable=too-many-locals
 
-        c_intermediates = len(intermediates) * c_void_p
-        arr_intermediates = c_intermediates()
-        for i, ca in enumerate(intermediates):
-            arr_intermediates[i] = ca.get_obj()
+        if intermediates is not None:
+            c_intermediates = len(intermediates) * c_void_p
+            arr_intermediates = c_intermediates()
+            for i, ca in enumerate(intermediates):
+                arr_intermediates[i] = ca.handle_()
+            len_intermediates = c_size_t(len(intermediates))
+        else:
+            arr_intermediates = c_void_p(0)
+            len_intermediates = c_size_t(0)
 
-        c_trusted = len(trusted) * c_void_p
-        arr_trusted = c_trusted()
-        for i, ca in enumerate(trusted):
-            arr_trusted[i] = ca.get_obj()
+        if trusted is not None:
+            c_trusted = len(trusted) * c_void_p
+            arr_trusted = c_trusted()
+            for i, ca in enumerate(trusted):
+                arr_trusted[i] = ca.handle_()
+            len_trusted = c_size_t(len(trusted))
+        else:
+            arr_trusted = c_void_p(0)
+            len_trusted = c_size_t(0)
+
+        if crls is not None:
+            c_crls = len(crls) * c_void_p
+            arr_crls = c_crls()
+            for i, crl in enumerate(crls):
+                arr_crls[i] = crl.handle_()
+            len_crls = c_size_t(len(crls))
+        else:
+            arr_crls = c_void_p(0)
+            len_crls = c_size_t(0)
 
         error_code = c_int(0)
 
-        _DLL.botan_x509_cert_verify(byref(error_code),
-                                    self.__obj,
-                                    byref(arr_intermediates),
-                                    c_size_t(len(intermediates)),
-                                    byref(arr_trusted),
-                                    c_size_t(len(trusted)),
-                                    _ctype_str(trusted_path),
-                                    c_size_t(required_strength),
-                                    _ctype_str(hostname),
-                                    c_uint64(reference_time))
+        _DLL.botan_x509_cert_verify_with_crl(byref(error_code),
+                                             self.__obj,
+                                             byref(arr_intermediates),
+                                             len_intermediates,
+                                             byref(arr_trusted),
+                                             len_trusted,
+                                             byref(arr_crls),
+                                             len_crls,
+                                             _ctype_str(trusted_path),
+                                             c_size_t(required_strength),
+                                             _ctype_str(hostname),
+                                             c_uint64(reference_time))
+
         return error_code.value
 
     @classmethod
     def validation_status(cls, error_code):
         return _ctype_to_str(_DLL.botan_x509_cert_validation_status(c_int(error_code)))
 
-class MPI(object):
+    def is_revoked(self, crl):
+        rc = _DLL.botan_x509_is_revoked(crl.handle_(), self.__obj)
+        return rc == 0
 
-    def __init__(self, initial_value=None):
+
+#
+# X.509 Certificate revocation lists
+#
+class X509CRL(object):
+    def __init__(self, filename=None, buf=None):
+        self.__obj = _load_buf_or_file(filename, buf, _DLL.botan_x509_crl_load_file, _DLL.botan_x509_crl_load)
+
+    def __del__(self):
+        _DLL.botan_x509_crl_destroy(self.__obj)
+
+    def handle_(self):
+        return self.__obj
+
+
+class MPI(object): # pylint: disable=too-many-public-methods
+
+    def __init__(self, initial_value=None, radix=None):
 
         self.__obj = c_void_p(0)
         _DLL.botan_mp_init(byref(self.__obj))
@@ -1426,6 +1484,8 @@ class MPI(object):
             pass # left as zero
         elif isinstance(initial_value, MPI):
             _DLL.botan_mp_set_from_mp(self.__obj, initial_value.handle_())
+        elif radix is not None:
+            _DLL.botan_mp_set_from_radix_str(self.__obj, _ctype_str(initial_value), c_size_t(radix))
         elif isinstance(initial_value, str):
             _DLL.botan_mp_set_from_str(self.__obj, _ctype_str(initial_value))
         else:
@@ -1590,6 +1650,16 @@ class MPI(object):
         shift = c_size_t(shift)
         _DLL.botan_mp_rshift(self.__obj, self.__obj, shift)
         return self
+
+    def mod_mul(self, other, modulus):
+        r = MPI()
+        _DLL.botan_mp_mod_mul(r.handle_(), self.__obj, other.handle_(), modulus.handle_())
+        return r
+
+    def gcd(self, other):
+        r = MPI()
+        _DLL.botan_mp_gcd(r.handle_(), self.__obj, other.handle_())
+        return r
 
     def pow_mod(self, exponent, modulus):
         r = MPI()

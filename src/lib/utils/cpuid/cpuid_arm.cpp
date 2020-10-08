@@ -16,6 +16,10 @@
 #else
   #include <botan/internal/os_utils.h>
 
+#if defined(BOTAN_TARGET_OS_HAS_GETAUXVAL) || defined(BOTAN_TARGET_OS_HAS_ELF_AUX_INFO)
+  #include <sys/auxv.h>
+#endif
+
 #endif
 
 #endif
@@ -101,6 +105,8 @@ uint64_t flags_by_ios_machine_type(const std::string& machine)
 
 uint64_t CPUID::CPUID_Data::detect_cpu_features(size_t* cache_line_size)
    {
+   BOTAN_UNUSED(cache_line_size);
+
    uint64_t detected_features = 0;
 
 #if defined(BOTAN_TARGET_OS_HAS_GETAUXVAL) || defined(BOTAN_TARGET_OS_HAS_ELF_AUX_INFO)
@@ -140,13 +146,11 @@ uint64_t CPUID::CPUID_Data::detect_cpu_features(size_t* cache_line_size)
 
 #if defined(AT_DCACHEBSIZE)
    // Exists only on Linux
-   const unsigned long dcache_line = ::getauxval(AT_DCACHEBSIZE);
+   const unsigned long dcache_line = OS::get_auxval(AT_DCACHEBSIZE);
 
    // plausibility check
    if(dcache_line == 32 || dcache_line == 64 || dcache_line == 128)
       *cache_line_size = static_cast<size_t>(dcache_line);
-#else
-   BOTAN_UNUSED(cache_line_size);
 #endif
 
    const unsigned long hwcap_neon = OS::get_auxval(ARM_hwcap_bit::ARCH_hwcap_neon);
@@ -188,6 +192,7 @@ uint64_t CPUID::CPUID_Data::detect_cpu_features(size_t* cache_line_size)
    ::sysctlbyname("hw.machine", machine, &size, nullptr, 0);
 
    detected_features = flags_by_ios_machine_type(machine);
+   // No way to detect cache line size on iOS?
 
 #elif defined(BOTAN_USE_GCC_INLINE_ASM) && defined(BOTAN_TARGET_ARCH_IS_ARM64)
 
@@ -200,11 +205,11 @@ uint64_t CPUID::CPUID_Data::detect_cpu_features(size_t* cache_line_size)
    NEON registers v0-v7 are caller saved in Aarch64
    */
 
-   auto neon_probe  = []() -> int { asm("and v0.16b, v0.16b, v0.16b"); return 1; };
-   auto aes_probe   = []() -> int { asm(".word 0x4e284800"); return 1; };
-   auto pmull_probe = []() -> int { asm(".word 0x0ee0e000"); return 1; };
-   auto sha1_probe  = []() -> int { asm(".word 0x5e280800"); return 1; };
-   auto sha2_probe  = []() -> int { asm(".word 0x5e282800"); return 1; };
+   auto neon_probe  = []() noexcept -> int { asm("and v0.16b, v0.16b, v0.16b"); return 1; };
+   auto aes_probe   = []() noexcept -> int { asm(".word 0x4e284800"); return 1; };
+   auto pmull_probe = []() noexcept -> int { asm(".word 0x0ee0e000"); return 1; };
+   auto sha1_probe  = []() noexcept -> int { asm(".word 0x5e280800"); return 1; };
+   auto sha2_probe  = []() noexcept -> int { asm(".word 0x5e282800"); return 1; };
 
    // Only bother running the crypto detection if we found NEON
 

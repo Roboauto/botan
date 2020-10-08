@@ -11,6 +11,8 @@ password hashing, and post quantum crypto schemes. A Python binding is included,
 and several other `language bindings
 <https://github.com/randombit/botan/wiki/Language-Bindings>`_ are available.
 It is used in many `open source and commercial products <https://github.com/randombit/botan/wiki/Users>`_.
+The library is accompanied by a featureful
+`command line interface <https://botan.randombit.net/handbook/cli.html>`_.
 
 See the `documentation <https://botan.randombit.net/handbook>`_ for more
 information about included features.
@@ -25,9 +27,9 @@ If you think you have found a security issue, see the `security page
 <https://botan.randombit.net/security.html>`_ for contact information.
 
 The latest release is
-`2.12.1 <https://botan.randombit.net/releases/Botan-2.12.1.tar.xz>`_
-`(sig) <https://botan.randombit.net/releases/Botan-2.12.1.tar.xz.asc>`_,
-released on 2019-10-14.
+`2.16.0 <https://botan.randombit.net/releases/Botan-2.16.0.tar.xz>`_
+`(sig) <https://botan.randombit.net/releases/Botan-2.16.0.tar.xz.asc>`_,
+released on 2020-10-06.
 All releases are signed with a `PGP key <https://botan.randombit.net/pgpkey.txt>`_.
 See the `release notes <https://botan.randombit.net/news.html>`_ for
 what is new. Botan is also available through most
@@ -107,11 +109,11 @@ Ciphers, hashes, MACs, and checksums
 
 * Authenticated cipher modes EAX, OCB, GCM, SIV, CCM, (X)ChaCha20Poly1305
 * Cipher modes CTR, CBC, XTS, CFB, OFB
-* Block ciphers AES, ARIA, Blowfish, Camellia, CAST-128, DES/3DES, GOST 28147,
-  IDEA, Lion, Noekeon, SEED, Serpent, SHACAL2, SM4, Threefish-512, Twofish, XTEA
+* Block ciphers AES, ARIA, Blowfish, Camellia, CAST-128, DES/3DES, IDEA,
+  Lion, Noekeon, SEED, Serpent, SHACAL2, SM4, Threefish-512, Twofish
 * Stream ciphers (X)ChaCha20, (X)Salsa20, SHAKE-128, RC4
 * Hash functions SHA-1, SHA-2, SHA-3, MD4, MD5, RIPEMD-160, BLAKE2b,
-  Skein-512, SM3, Tiger, Whirlpool, GOST 34.11-94, GOST 34.11-2012
+  Skein-512, SM3, Streebog, Whirlpool
 * Authentication codes HMAC, CMAC, Poly1305, SipHash, GMAC, X9.19 DES-MAC
 * Non-cryptographic checksums Adler32, CRC24, CRC32
 

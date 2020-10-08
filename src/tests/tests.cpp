@@ -568,7 +568,7 @@ std::vector<uint8_t> Test::read_binary_data_file(const std::string& path)
       {
       std::vector<uint8_t> buf(4096);
       file.read(reinterpret_cast<char*>(buf.data()), buf.size());
-      size_t got = file.gcount();
+      const size_t got = static_cast<size_t>(file.gcount());
 
       if(got == 0 && file.eof())
          {
@@ -595,14 +595,6 @@ void Test::set_test_options(const Test_Options& opts)
 //static
 void Test::set_test_rng(std::unique_ptr<Botan::RandomNumberGenerator> rng)
    {
-#if defined(BOTAN_TARGET_OS_HAS_THREADS)
-   if(m_opts.test_threads() != 1)
-      {
-      m_test_rng.reset(new Botan::Serialized_RNG(rng.release()));
-      return;
-      }
-#endif
-
    m_test_rng.reset(rng.release());
    }
 
@@ -1070,9 +1062,6 @@ std::vector<Test::Result> Text_Based_Test::run()
          try
             {
             if(skip_this_test(header, vars))
-               continue;
-
-            if(possible_providers(header).empty())
                continue;
 
             ++test_cnt;

@@ -3,6 +3,7 @@
 aes
 
 # modes
+ccm
 gcm
 cbc
 mode_pad
@@ -69,12 +70,11 @@ sha3_bmi2
 # entropy sources
 dev_random
 proc_walk
-rdrand
 rdseed
 win32_stats
 
 # rng
-rdrand_rng
+processor_rng
 system_rng
 
 # utils
@@ -114,7 +114,6 @@ twofish
 xtea
 
 # modes
-ccm
 chacha20poly1305
 eax
 ocb

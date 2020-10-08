@@ -66,8 +66,8 @@ The following enum values are defined in the FFI header:
 
    .. note::
 
-      If the environment variable ``BOTAN_FFI_PRINT_EXCEPTIONS`` is
-      set, then any exception which is caught by the FFI layer will
+      If the environment variable ``BOTAN_FFI_PRINT_EXCEPTIONS`` is set to any
+      non-empty value, then any exception which is caught by the FFI layer will
       first print the exception message to stderr before returning an
       error. This is sometimes useful for debugging.
 
@@ -162,6 +162,7 @@ supported it.
 ============== ===================
 FFI Version    Supported Starting
 ============== ===================
+20191214       2.13.0
 20180713       2.8.0
 20170815       2.3.0
 20170327       2.1.0
@@ -207,7 +208,7 @@ Random Number Generators
    "user": ``AutoSeeded_RNG``,
    "user-threadsafe": serialized ``AutoSeeded_RNG``,
    "null": ``Null_RNG`` (always fails),
-   "rdrand": ``RDRAND_RNG`` (if available)
+   "hwrnd" or "rdrand": ``Processor_RNG`` (if available)
 
 .. cpp:function:: int botan_rng_get(botan_rng_t rng, uint8_t* out, size_t out_len)
 
@@ -1152,7 +1153,51 @@ X.509 Certificates
     Set ``reference_time`` to be the time which the certificate chain is
     validated against. Use zero to use the current system clock.
 
+.. cpp:function:: int botan_x509_cert_verify_with_crl(int* validation_result, \
+                  botan_x509_cert_t cert, \
+                  const botan_x509_cert_t* intermediates, \
+                  size_t intermediates_len, \
+                  const botan_x509_cert_t* trusted, \
+                  size_t trusted_len, \
+                  const botan_x509_crl_t* crls, \
+                  size_t crls_len, \
+                  const char* trusted_path, \
+                  size_t required_strength, \
+                  const char* hostname, \
+                  uint64_t reference_time)
+
+   Certificate path validation supporting Certificate Revocation Lists.
+
+   Works the same as ``botan_x509_cert_cerify``.
+
+   ``crls`` is an array of ``botan_x509_crl_t`` objects, ``crls_len`` is its length.
+
 .. cpp:function:: const char* botan_x509_cert_validation_status(int code)
 
    Return a (statically allocated) string associated with the verification
    result.
+
+X.509 Certificate Revocation Lists
+----------------------------------------
+
+.. cpp:type:: opaque* botan_x509_crl_t
+
+   An opaque data type for an X.509 CRL.
+
+.. cpp:function:: int botan_x509_crl_load(botan_x509_crl_t* crl_obj, \
+                                        const uint8_t crl[], size_t crl_len)
+
+   Load a CRL from the DER or PEM representation.
+
+.. cpp:function:: int botan_x509_crl_load_file(botan_x509_crl_t* crl_obj, const char* filename)
+
+   Load a CRL from a file.
+
+.. cpp:function:: int botan_x509_crl_destroy(botan_x509_crl_t crl)
+
+   Destroy the CRL object.
+
+.. cpp:function:: int botan_x509_is_revoked(botan_x509_crl_t crl, botan_x509_cert_t cert)
+
+   Check whether a given ``crl`` contains a given ``cert``.
+   Return ``0`` when the certificate is revoked, ``-1`` otherwise.

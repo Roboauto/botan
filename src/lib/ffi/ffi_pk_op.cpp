@@ -28,7 +28,7 @@ int botan_pk_op_encrypt_create(botan_pk_op_encrypt_t* op,
    if(op == nullptr)
       return BOTAN_FFI_ERROR_NULL_POINTER;
 
-   if(flags != 0)
+   if(flags != 0 && flags != BOTAN_PUBKEY_DER_FORMAT_SIGNATURE)
       return BOTAN_FFI_ERROR_BAD_FLAG;
 
    return ffi_guard_thunk(__func__, [=]() -> int {
@@ -117,13 +117,15 @@ int botan_pk_op_sign_create(botan_pk_op_sign_t* op,
    if(op == nullptr)
       return BOTAN_FFI_ERROR_NULL_POINTER;
 
-   if(flags != 0)
+   if(flags != 0 && flags != BOTAN_PUBKEY_DER_FORMAT_SIGNATURE)
       return BOTAN_FFI_ERROR_BAD_FLAG;
 
    return ffi_guard_thunk(__func__, [=]() -> int {
       *op = nullptr;
 
-      std::unique_ptr<Botan::PK_Signer> pk(new Botan::PK_Signer(safe_get(key_obj), Botan::system_rng(), hash));
+      auto format = (flags & BOTAN_PUBKEY_DER_FORMAT_SIGNATURE) ? Botan::DER_SEQUENCE : Botan::IEEE_1363;
+
+      std::unique_ptr<Botan::PK_Signer> pk(new Botan::PK_Signer(safe_get(key_obj), Botan::system_rng(), hash, format));
       *op = new botan_pk_op_sign_struct(pk.release());
       return BOTAN_FFI_SUCCESS;
       });
@@ -162,12 +164,13 @@ int botan_pk_op_verify_create(botan_pk_op_verify_t* op,
    if(op == nullptr)
       return BOTAN_FFI_ERROR_NULL_POINTER;
 
-   if(flags != 0)
+   if(flags != 0 && flags != BOTAN_PUBKEY_DER_FORMAT_SIGNATURE)
       return BOTAN_FFI_ERROR_BAD_FLAG;
 
    return ffi_guard_thunk(__func__, [=]() -> int {
       *op = nullptr;
-      std::unique_ptr<Botan::PK_Verifier> pk(new Botan::PK_Verifier(safe_get(key_obj), hash));
+      auto format = (flags & BOTAN_PUBKEY_DER_FORMAT_SIGNATURE) ? Botan::DER_SEQUENCE : Botan::IEEE_1363;
+      std::unique_ptr<Botan::PK_Verifier> pk(new Botan::PK_Verifier(safe_get(key_obj), hash, format));
       *op = new botan_pk_op_verify_struct(pk.release());
       return BOTAN_FFI_SUCCESS;
       });
@@ -185,7 +188,7 @@ int botan_pk_op_verify_update(botan_pk_op_verify_t op, const uint8_t in[], size_
 
 int botan_pk_op_verify_finish(botan_pk_op_verify_t op, const uint8_t sig[], size_t sig_len)
    {
-   return BOTAN_FFI_DO(Botan::PK_Verifier, op, o, {
+   return BOTAN_FFI_RETURNING(Botan::PK_Verifier, op, o, {
       const bool legit = o.check_signature(sig, sig_len);
 
       if(legit)

@@ -387,11 +387,11 @@ Private Key
 
   .. py:method:: to_pem()
 
-     Return the PEM encoded private key (unencrypted)
+     Return the PEM encoded private key (unencrypted). Like ``self.export(True)``
 
   .. py:method:: to_der()
 
-     Return the PEM encoded private key (unencrypted)
+     Return the PEM encoded private key (unencrypted). Like ``self.export(False)``
 
   .. py:method:: check_key(rng_obj, strong=True):
 
@@ -413,14 +413,6 @@ Private Key
      Exports the private key in PKCS8 format, encrypted using the
      provided passphrase. If ``pem`` is True, the result is a PEM
      encoded string. Otherwise it is a binary DER value.
-
-  .. py:method:: to_der()
-
-     Like ``self.export(False)``
-
-  .. py:method:: to_pem()
-
-     Like ``self.export(True)``
 
   .. py:method:: get_field(field_name)
 
@@ -474,17 +466,19 @@ Multiple Precision Integers (MPI)
 -------------------------------------
 .. versionadded:: 2.8.0
 
-.. py:class:: MPI(initial_value=None)
+.. py:class:: MPI(initial_value=None, radix=None)
 
    Initialize an MPI object with specified value, left as zero otherwise.  The
    ``initial_value`` should be an ``int``, ``str``, or ``MPI``.
+   The ``radix`` value should be set to 16 when initializing from a base 16 `str` value.
+
 
    Most of the usual arithmetic operators (``__add__``, ``__mul__``, etc) are
    defined.
 
    .. py:method:: inverse_mod(modulus)
 
-      Return the inverse of ``self`` modulo modulus, or zero if no inverse exists
+      Return the inverse of ``self`` modulo ``modulus``, or zero if no inverse exists
 
    .. py:method:: is_prime(rng, prob=128)
 
@@ -493,6 +487,15 @@ Multiple Precision Integers (MPI)
    .. py:method:: pow_mod(exponent, modulus):
 
       Return ``self`` to the ``exponent`` power modulo ``modulus``
+
+   .. py:method:: mod_mul(other, modulus):
+
+      Return the multiplication product of ``self`` and ``other`` modulo ``modulus``
+
+   .. py:method:: gcd(other):
+
+      Return the greatest common divisor of ``self`` and ``other``
+
 
 Format Preserving Encryption (FE1 scheme)
 -----------------------------------------
@@ -536,7 +539,7 @@ HOTP
 X509Cert
 -----------------------------------------
 
-.. py:class:: X509Cert(filename=None, buf=None)
+.. py:class:: X509Cert(filename=None, buf=None) 
 
    .. py:method:: time_starts()
 
@@ -615,7 +618,8 @@ X509Cert
                   trusted_path=None, \
                   required_strength=0, \
                   hostname=None, \
-                  reference_time=0)
+                  reference_time=0 \
+                  crls=None)
 
       Verify a certificate. Returns 0 if validation was successful, returns a positive error code 
       if the validation was unsuccesful.
@@ -637,16 +641,25 @@ X509Cert
       Set ``reference_time`` to be the time which the certificate chain is
       validated against. Use zero (default) to use the current system clock.
 
+      ``crls`` is a list of CRLs issued by either trusted or untrusted authorities.
+
    .. py:classmethod:: validation_status(error_code)
 
       Return an informative string associated with the verification return code.
 
-     
+   .. py:method:: is_revoked(self, crl)
 
+      Check if the certificate (``self``) is revoked on the given ``crl``.
 
+X509CRL
+-----------------------------------------
 
+.. py:class:: X509CRL(filename=None, buf=None)
 
+   Class representing an X.509 Certificate Revocation List.
 
+   A CRL in PEM or DER format can be loaded from a file, with the ``filename`` argument,
+   or from a bytestring, with the ``buf`` argument.
 
 
 

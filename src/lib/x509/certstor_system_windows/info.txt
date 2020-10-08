@@ -11,5 +11,6 @@ certstor_windows.h
 </header:public>
 
 <libs>
-windows -> crypt32.lib
+windows -> crypt32
+mingw -> crypt32
 </libs>

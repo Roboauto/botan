@@ -18,12 +18,13 @@
 namespace Botan {
 
 XMSS_Signature_Operation::XMSS_Signature_Operation(
-   const XMSS_PrivateKey& private_key)
-   : XMSS_Common_Ops(private_key.xmss_oid()),
-     m_priv_key(private_key),
-     m_randomness(0),
-     m_leaf_idx(0),
-     m_is_initialized(false)
+   const XMSS_PrivateKey& private_key) :
+   m_priv_key(private_key),
+   m_xmss_params(private_key.xmss_oid()),
+   m_hash(private_key.xmss_hash_function()),
+   m_randomness(0),
+   m_leaf_idx(0),
+   m_is_initialized(false)
    {}
 
 XMSS_WOTS_PublicKey::TreeSignature
@@ -100,7 +101,7 @@ void XMSS_Signature_Operation::initialize()
    secure_vector<uint8_t> index_bytes;
    // reserve leaf index so it can not be reused in by another signature
    // operation using the same private key.
-   m_leaf_idx = m_priv_key.reserve_unused_leaf_index();
+   m_leaf_idx = static_cast<uint32_t>(m_priv_key.reserve_unused_leaf_index());
 
    // write prefix for message hashing into buffer.
    XMSS_Tools::concat(index_bytes, m_leaf_idx, 32);

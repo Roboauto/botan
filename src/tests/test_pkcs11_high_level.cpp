@@ -2,6 +2,7 @@
 * (C) 2016 Daniel Neus
 * (C) 2016 Philipp Weber
 * (C) 2019 Michael Boric
+* (C) 2020 René Korthaus
 *
 * Botan is released under the Simplified BSD License (see license.txt)
 */
@@ -27,8 +28,12 @@
    #include <botan/der_enc.h>
 #endif
 
-#if defined (BOTAN_HAS_PUBLIC_KEY_CRYPTO)
+#if defined(BOTAN_HAS_PUBLIC_KEY_CRYPTO)
    #include <botan/pubkey.h>
+#endif
+
+#if defined(BOTAN_HAS_ECC_GROUP)
+   #include <botan/ec_group.h>
 #endif
 
 #if defined(BOTAN_HAS_RSA) && defined(BOTAN_HAS_PKCS11)
@@ -111,6 +116,11 @@ class TestSession
       inline Session& session() const
          {
          return *m_session;
+         }
+
+      inline Slot& slot() const
+         {
+         return *m_slot;
          }
 
    private:
@@ -903,6 +913,15 @@ BOTAN_REGISTER_TEST("pkcs11-rsa", PKCS11_RSA_Tests);
 
 /***************************** PKCS11 ECDSA *****************************/
 
+#if defined(BOTAN_HAS_ECC_GROUP) && (defined(BOTAN_HAS_ECDSA) || defined(BOTAN_HAS_ECDH))
+std::vector<uint8_t> encode_ec_point_in_octet_str(const Botan::PointGFp& point)
+   {
+   std::vector<uint8_t> enc;
+   DER_Encoder(enc).encode(point.encode(PointGFp::UNCOMPRESSED), OCTET_STRING);
+   return enc;
+   }
+#endif
+
 #if defined(BOTAN_HAS_ECDSA)
 
 Test::Result test_ecdsa_privkey_import()
@@ -968,13 +987,6 @@ Test::Result test_ecdsa_privkey_export()
 
    pk.destroy();
    return result;
-   }
-
-std::vector<uint8_t> encode_ec_point_in_octet_str(const Botan::PointGFp& point)
-   {
-   std::vector<uint8_t> enc;
-   DER_Encoder(enc).encode(point.encode(PointGFp::UNCOMPRESSED), OCTET_STRING);
-   return enc;
    }
 
 Test::Result test_ecdsa_pubkey_import()
@@ -1108,6 +1120,10 @@ Test::Result test_ecdsa_sign_verify_core(EC_Group_Encoding ec_dompar_enc, std::s
     curves.push_back("secp256r1");
     curves.push_back("brainpool512r1");
 
+    Slot& slot = test_session.slot();
+    SlotInfo info = slot.get_slot_info();
+    std::string manufacturer(reinterpret_cast< char* >(info.manufacturerID));
+
     for(auto &curve : curves)
         {
         // generate key pair
@@ -1115,26 +1131,39 @@ Test::Result test_ecdsa_sign_verify_core(EC_Group_Encoding ec_dompar_enc, std::s
 
         std::vector<uint8_t> plaintext(20, 0x01);
 
-        auto sign_and_verify = [&keypair, &plaintext, &result](const std::string& emsa)
+        auto sign_and_verify = [&keypair, &plaintext, &result](const std::string& emsa,
+               const Botan::Signature_Format format, bool check_soft)
             {
-            Botan::PK_Signer signer(keypair.second, Test::rng(), emsa, Botan::IEEE_1363);
+            Botan::PK_Signer signer(keypair.second, Test::rng(), emsa, format);
             auto signature = signer.sign_message(plaintext, Test::rng());
 
-            Botan::PK_Verifier token_verifier(keypair.first, emsa, Botan::IEEE_1363);
+            Botan::PK_Verifier token_verifier(keypair.first, emsa, format);
             bool ecdsa_ok = token_verifier.verify_message(plaintext, signature);
 
             result.test_eq("ECDSA PKCS11 sign and verify: " + emsa, ecdsa_ok, true);
 
             // test against software implementation if available
-#if defined (BOTAN_HAS_EMSA_RAW)
-            Botan::PK_Verifier soft_verifier(keypair.first, emsa, Botan::IEEE_1363);
-            bool soft_ecdsa_ok = soft_verifier.verify_message(plaintext, signature);
+            if(check_soft)
+               {
+               Botan::PK_Verifier soft_verifier(keypair.first, emsa, format);
+               bool soft_ecdsa_ok = soft_verifier.verify_message(plaintext, signature);
 
-            result.test_eq("ECDSA PKCS11 verify (in software): " + emsa, soft_ecdsa_ok, true);
-#endif
+               result.test_eq("ECDSA PKCS11 verify (in software): " + emsa, soft_ecdsa_ok, true);
+               }
             };
 
-        sign_and_verify("Raw");   // SoftHSMv2 until now only supports "Raw"
+        // SoftHSMv2 until now only supports "Raw"
+        if(manufacturer.find("SoftHSM project") == std::string::npos)
+           {
+           sign_and_verify("EMSA1(SHA-256)", Botan::IEEE_1363, true);
+           sign_and_verify("EMSA1(SHA-256)", Botan::DER_SEQUENCE, true);
+           }
+
+#if defined (BOTAN_HAS_EMSA_RAW)
+        sign_and_verify("Raw", Botan::IEEE_1363, true);
+#else
+        sign_and_verify("Raw", Botan::IEEE_1363, false);
+#endif
 
         keypair.first.destroy();
         keypair.second.destroy();

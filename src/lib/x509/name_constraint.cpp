@@ -115,9 +115,13 @@ GeneralName::MatchResult GeneralName::matches(const X509_Certificate& cert) cons
       {
       match_fn = std::mem_fn(&GeneralName::matches_dn);
 
-      std::stringstream ss;
-      ss << dn;
-      nam.push_back(ss.str());
+      nam.push_back(dn.to_string());
+
+      const auto alt_dn = alt_name.dn();
+      if(alt_dn.empty() == false)
+         {
+         nam.push_back(alt_dn.to_string());
+         }
       }
    else if(type() == "IP")
       {
@@ -227,14 +231,14 @@ std::ostream& operator<<(std::ostream& os, const GeneralName& gn)
 GeneralSubtree::GeneralSubtree(const std::string& str) : GeneralSubtree()
    {
    size_t p0, p1;
-   size_t min = std::stoull(str, &p0, 10);
-   size_t max = std::stoull(str.substr(p0 + 1), &p1, 10);
+   const auto min = std::stoull(str, &p0, 10);
+   const auto max = std::stoull(str.substr(p0 + 1), &p1, 10);
    GeneralName gn(str.substr(p0 + p1 + 2));
 
    if(p0 > 0 && p1 > 0)
       {
-      m_minimum = min;
-      m_maximum = max;
+      m_minimum = static_cast<size_t>(min);
+      m_maximum = static_cast<size_t>(max);
       m_base = gn;
       }
    else

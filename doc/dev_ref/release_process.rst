@@ -27,18 +27,18 @@ constraints. So before release:
 
  - Run under valgrind, building with ``--with-valgrind`` flag
  - Using Clang sanitizers (ASan + UbSan)
- - Native or cross compile for Linux aarch64 and ppc64le
  - Native compile on FreeBSD x86-64
  - Native compile on at least one unusual platform (AIX, NetBSD, ...)
  - Build the website content to detect any Doxygen problems
  - Test many build configurations (using `src/scripts/test_all_configs.py`)
  - Build/test SoftHSM
 
-Pre Release Checks
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
 Confirm that the release notes in ``news.rst`` are accurate and
 complete and that the version number in ``version.txt`` is correct.
+
+Tag the Release
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 Update the release date in the release notes and change the entry for
 the appropriate branch in ``readme.rst`` to point to the new release.
 

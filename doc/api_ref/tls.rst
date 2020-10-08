@@ -28,7 +28,7 @@ If the reader is familiar with OpenSSL's BIO layer, it might be analogous
 to saying the only way of interacting with Botan's TLS is via a `BIO_mem` I/O
 abstraction. This makes the library completely agnostic to how you
 write your network layer, be it blocking sockets, libevent, asio, a
-message queue, lwIP on RTOS, some carrier pidgeons, etc.
+message queue, lwIP on RTOS, some carrier pigeons, etc.
 
 Starting in 1.11.31, the application callbacks are encapsulated as the class
 ``TLS::Callbacks`` with the following members. The first four (``tls_emit_data``,
@@ -497,6 +497,8 @@ The full code for a TLS client using BSD sockets is in `src/cli/tls_client.cpp`
           }
        }
 
+.. _tls_server:
+
 TLS Servers
 ----------------------------------------
 
@@ -669,8 +671,8 @@ information about that session:
 .. note::
 
    The serialization format of Session is not considered stable and is allowed
-   to change even within a single major release cycle. In the event of such a
-   change, old sessions will no longer be able to be resumed.
+   to change even across minor releases. In the event of such a change, old
+   sessions will no longer be able to be resumed.
 
 .. cpp:class:: TLS::Session
 
@@ -920,7 +922,7 @@ policy settings from a file.
         simply allow only ECDH key exchange in the application policy. DH
         exchange also often involves transferring several additional Kb (without
         the benefit of post quantum security) so if CECPQ1 is being disabled for
-        traffic overhead reasons, DH should also be avoid.
+        traffic overhead reasons, DH should also be avoided.
 
      Also allowed: "RSA", "SRP_SHA", "ECDHE_PSK", "DHE_PSK", "PSK"
 
@@ -1016,13 +1018,15 @@ policy settings from a file.
      most out of the client's list. Otherwise, it will negotiate the
      first cipher in the client's ciphersuite list that it supports.
 
+     Default: true
+
  .. cpp:function:: bool allow_client_initiated_renegotiation() const
 
      If this function returns true, a server will accept a
      client-initiated renegotiation attempt. Otherwise it will send
      the client a non-fatal ``no_renegotiation`` alert.
 
-     Default: true
+     Default: false
 
  .. cpp:function:: bool allow_server_initiated_renegotiation() const
 
@@ -1639,7 +1643,7 @@ Server Code Example
 TLS Stream
 ----------------------------------------
 
-:cpp:class:`TLS::Stream` offers a Boost.Asio compatible wrapper around :cpp:class:`TLS::Client`.
+:cpp:class:`TLS::Stream` offers a Boost.Asio compatible wrapper around :cpp:class:`TLS::Client` and :cpp:class:`TLS::Server`.
 It can be used as an alternative to Boost.Asio's `ssl::stream <https://www.boost.org/doc/libs/1_66_0/doc/html/boost_asio/reference/ssl__stream.html>`_ with minor adjustments to the using code.
 It offers the following interface:
 
@@ -1652,7 +1656,7 @@ It offers the following interface:
                      explicit Stream(Context& context, Args&& ... args)
 
    Construct a new TLS stream.
-   The *context* parameter will be used to set up the underlying *native handle*, i.e. the :ref:`TLS::Client <tls_client>`, when :cpp:func:`handshake` is called.
+   The *context* parameter will be used to initialize the underlying *native handle*, i.e. the :ref:`TLS::Client <tls_client>` or :ref:`TLS::Server <tls_server>`, when :cpp:func:`handshake` is called.
    Using code must ensure the context is kept alive for the lifetime of the stream.
    The further *args* will be forwarded to the *next layer*'s constructor.
 
@@ -1666,7 +1670,6 @@ It offers the following interface:
    .. cpp:function:: void handshake(Connection_Side side, boost::system::error_code& ec)
 
    Set up the *native handle* and perform the TLS handshake.
-   As only the client side of the stream is currently implemented, *side* should be ``Connection_Side::CLIENT``.
 
    .. cpp:function:: void handshake(Connection_Side side)
 
@@ -1687,6 +1690,12 @@ It offers the following interface:
    .. cpp:function:: void shutdown()
 
    Overload of :cpp:func:`shutdown` that throws an exception if an error occurs.
+
+   .. cpp:function:: template <typename ShutdownHandler> \
+                     void async_shutdown(ShutdownHandler&& handler)
+
+   Asynchronous variant of :cpp:func:`shutdown`.
+   The function returns immediately and calls the *handler* callback function after performing asynchronous I/O to complete the TLS shutdown.
 
 
    .. cpp:function:: template <typename MutableBufferSequence> \
@@ -1732,7 +1741,7 @@ It offers the following interface:
 
 .. cpp:class:: TLS::Context
 
-   A helper class to initialize and configure the Stream's underlying *native handle* (see :cpp:class:`TLS::Client`).
+   A helper class to initialize and configure the Stream's underlying *native handle* (see :cpp:class:`TLS::Client` and :cpp:class:`TLS::Server`).
 
    .. cpp:function:: Context(Credentials_Manager&   credentialsManager, \
                              RandomNumberGenerator& randomNumberGenerator, \
@@ -1748,8 +1757,10 @@ It offers the following interface:
    will cause the stream to override the default implementation of the
    :cpp:func:`tls_verify_cert_chain` callback.
 
-Stream Code Example
-^^^^^^^^^^^^^^^^^^^^
+TLS Stream Client Code Example
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The code below illustrates how to build a simple HTTPS client based on the TLS Stream and Boost.Beast. When run, it fetches the content of `https://botan.randombit.net/news.html` and prints it to stdout.
 
 .. code-block:: cpp
 
@@ -1889,27 +1900,27 @@ A unified format is used for encrypting TLS sessions either for durable storage
 (on client or server) or when creating TLS session tickets. This format is *not
 stable* even across the same major version.
 
-The current session encryption scheme was introduced in 1.11.13.
+The current session encryption scheme was introduced in 2.13.0, replacing the
+format previously used since 1.11.13.
 
 Session encryption accepts a key of any length, though for best security a key
 of 256 bits should be used. This master key is used to key an instance of HMAC
-using the SHA-256 hash.
+using the SHA-512/256 hash.
 
-A random 96 bit nonce is created and included in the header. Then the nonce is
-hashed using the keyed HMAC to produce a 256-bit GCM key. This key and nonce
-pair are used to encrypt the session.
+First a "key name" or identifier is created, by HMAC'ing the fixed string "BOTAN
+TLS SESSION KEY NAME" and truncating to 4 bytes. This is the initial prefix of
+the encrypted session, and will remain fixed as long as the same ticket key is
+used. This allows quickly rejecting sessions which are encrypted using an
+unknown or incorrect key.
 
-The current design is unfortunate in several ways:
+Then a key used for AES-256 in GCM mode is created by first choosing a 128 bit
+random seed, and HMAC'ing it to produce a 256-bit value. This means for any one
+master key as many as 2\ :sup:`128` GCM keys can be created. This is done
+because NIST recommends that when using random nonces no one GCM key be used to
+encrypt more than 2\ :sup:`32` messages (to avoid the possiblity of nonce
+reuse).
 
- * If the random 96-bit nonce ever repeats, then the same GCM key *and nonce*
-   are used to encrypt 2 different sessions, breaking the security of sessions
-   encrypted using that duplicated key/nonce. The GCM nonce should have been
-   independently created and included in the header, making a key collision
-   harmless.
+A random 96-bit nonce is created and included in the header.
 
- * There is no simple way to detect old or rotated keys, except by attempting
-   decryption. Instead a key identifier should be included in the header.
-
- * There is no indicator of the format used, which makes handling format
-   upgrades without breaking compatability awkward.
-
+AES in GCM is used to encrypt and authenticate the serialized session. The
+key name, key seed, and AEAD nonce are all included as additional data.

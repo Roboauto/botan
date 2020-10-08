@@ -1,15 +1,183 @@
 Release Notes
 ========================================
 
-Version 2.13.0, Not Yet Released
+Version 2.16.0, 2020-10-06
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* Now userspace PRNG objects (such as AutoSeeded_RNG and HMAC_DRBG)
+  use an internal lock, which allows safe concurrent use. This however
+  is purely a precaution in case of accidental sharing of such RNG
+  objects; for performance reasons it is always preferable to use
+  a RNG per thread if a userspace RNG is needed. (GH #2399)
+
+* DL_Group and EC_Group objects now track if they were created from a
+  known trusted group (such as P-256 or an IPsec DH parameter).  If
+  so, then verification tests can be relaxed, as compared to
+  parameters which may have been maliciously constructed in order to
+  pass primality checks. (GH #2409)
+
+* RandomNumberGenerator::add_entropy_T assumed its input was a POD
+  type but did not verify this. (GH #2403)
+
+* Support OCSP responders that live on a non-standard port (GH #2401)
+
+* Add support for Solaris sandbox (GH #2385)
+
+* Support suffixes on release numbers for alpha/beta releases (GH #2404)
+
+* Fix a bug in EAX which allowed requesting a 0 length tag, which had
+  the effect of using a full length tag. Instead omit the length field,
+  or request the full tag length explicitly. (GH #2392 #2390)
+
+* Fix a memory leak in GCM where if passed an unsuitable block cipher
+  (eg not 128 bit) it would throw an exception and leak the cipher
+  object. (GH #2392 #2388)
+
+Version 2.15.0, 2020-07-07
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* Fix a bug where the name constraint extension did not constrain the
+  alternative DN field which can be included in a subject alternative name. This
+  would allow a corrupted sub-CA which was otherwise constrained by a name
+  constraint to issue a certificate with a prohibited DN.
+
+* Fix a bug in the TLS server during client authentication where where
+  if a (disabled by default) static RSA ciphersuite was selected, then
+  no certificate request would be sent. This would have an equivalent
+  effect to a client which simply replied with an empty Certificate
+  message. (GH #2367)
+
+* Replace the T-Tables implementation of AES with a 32-bit bitsliced
+  version. As a result AES is now constant time on all processors.
+  (GH #2346 #2348 #2353 #2329 #2355)
+
+* In TLS, enforce that the key usage given in the server certificate
+  allows the operation being performed in the ciphersuite. (GH #2367)
+
+* In X.509 certificates, verify that the algorithm parameters are
+  the expected NULL or empty. (GH #2367)
+
+* Change the HMAC key schedule to attempt to reduce the information
+  leaked from the key schedule with regards to the length of the key,
+  as this is at times (as for example in PBKDF2) sensitive information.
+  (GH #2362)
+
+* Add Processor_RNG which wraps RDRAND or the POWER DARN RNG
+  instructions. The previous RDRAND_RNG interface is deprecated.
+  (GH #2352)
+
+* The documentation claimed that mlocked pages were created with a
+  guard page both before and after. However only a trailing guard page
+  was used. Add a leading guard page. (GH #2334)
+
+* Add support for generating and verifying DER-encoded ECDSA signatures
+  in the C and Python interfaces. (GH #2357 #2356)
+
+* Workaround a bug in GCC's UbSan which triggered on a code sequence
+  in XMSS (GH #2322)
+
+* When building documentation using Sphinx avoid parallel builds with
+  version 3.0 due to a bug in that version (GH #2326 #2324)
+
+* Fix a memory leak in the CommonCrypto block cipher calls (GH #2371)
+
+* Fix a flaky test that would occasionally fail when running the tests
+  with a large number of threads. (GH #2325 #2197)
+
+* Additional algorithms are now deprecated: XTEA, GOST, and Tiger.
+  They will be removed in a future major release.
+
+Version 2.14.0, 2020-04-06
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* Add support for using POWER8+ VPSUMD instruction to accelerate GCM
+  (GH #2247)
+
+* Optimize the vector permute AES implementation, especially improving
+  performance on ARMv7, Aarch64, and POWER. (GH #2243)
+
+* Use a new algorithm for modular inversions which is both faster and
+  more resistant to side channel attacks. (GH #2287 #2296 #2301)
+
+* Address an issue in CBC padding which would leak the length of the
+  plaintext which was being padded. Unpadding during decryption was
+  not affected. Thanks to Maximilian Blochberger for reporting this.
+  (GH #2312)
+
+* Optimize NIST prime field reductions, improving ECDSA by 3-9% (GH #2295)
+
+* Increase the size of the ECC blinding mask and scale it based on the
+  size of the group order. (GH #880 #893 #2308)
+
+* Add server side support for the TLS asio wrapper. (GH #2229)
+
+* Add support for using Windows certificate store on MinGW (GH #2280)
+
+* Use the library thread pool instead of a new thread for RSA computations,
+  improving signature performance by up to 20%. (GH #2257)
+
+* Precompute and cache additional fields in ``X509_Certificate`` (GH #2250)
+
+* Add a CLI utility ``cpu_clock`` which estimates the speed of the
+  processor cycle counter. (GH #2251)
+
+* Fix a bug which prevented using DER-encoded ECDSA signatures with a PKCS11
+  key (GH #2293)
+
+* Enable use of raw block ciphers from CommonCrypto (GH #2278)
+
+* Support for splitting up the amalgamation file by ABI extension has
+  been removed. Instead only ``botan_all.cpp`` and ``botan_all.h`` are
+  generated. (GH #2246)
+
+* Improve support for baremetal systems with no underlying OS, with
+  target OS ``none`` (GH #2303 #2304 #2305)
+
+* The build system now avoids using ``-rpath=$ORIGIN`` or (on macOS)
+  install_name which allowed running the tests from the build
+  directory without setting ``LD_LIBRARY_PATH``/``DYLD_LIBRARY_PATH``
+  environment variables. Instead set the dynamic linker variables
+  appropriately, or use ``make check``. (GH #2294 #2302)
+
+* Add new option ``--name-amalgamation`` which allows naming the
+  amalgamation output, instead of the default ``botan_all``. (GH #2246)
+
+* Avoid using symbolic links on Windows (GH #2288 #2286 #2285)
+
+* Fix a bug that prevented compilation of the amalgamation on ARM and
+  POWER processors (GH #2245 #2241)
+
+* Fix some build problems under Intel C++ (GH #2260)
+
+* Remove use of Toolhelp Windows library, which was known to trigger
+  false positives under some antivirus systems. (GH #2261)
+
+* Fix a compilation problem when building on Windows in Unicode mode.
+  Add Unicode build to CI to prevent regressions. (GH #2254 #2256)
+
+* Work around a GCC bug affecting old libc (GH #2235)
+
+* Workaround a bug in macOS 10.15 which caused a test to crash.
+  (GH #2279 #2268)
+
+* Avoid a crash in PKCS8::load_key due to a bug in Clang 8.
+  (GH #2277)
+
+Version 2.13.0, 2020-01-06
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 * Add Roughtime client (GH #2143 #1842)
 
 * Add support for XMSS X.509 certificates (GH #2172)
 
+* Add support for X.509 CRLs in FFI layer and Python wrapper (GH #2213)
+
 * It is now possible to disable TLS v1.0/v1.1 and DTLS v1.0 at build time.
   (GH #2188)
+
+* The format of encrypted TLS sessions has changed, which will invalidate all
+  existing session tickets. The new format will make it easier to support ticket
+  key rotation in the future. (GH #2225)
 
 * Improve RSA key generation performance (GH #2148)
 
@@ -29,8 +197,25 @@ Version 2.13.0, Not Yet Released
 * Disable stack protector on MinGW as it causes crashes with some recent
   versions. (GH #2187)
 
+* On Windows the DLL is now installed into the binary directory (GH #2233)
+
+* Previously Windows required an explicit ``.lib`` suffix be added when
+  providing an explicit library name, as is used for example for Boost.
+  Now the ``.lib`` suffix is implicit, and should be omitted.
+
+* Remove the 32-bit x86 inline asm for Visual C++ as it seemed to not offer
+  much in the way of improved performance. (GH #2204 #256)
+
+* Resolve all compile time warnings generated by GCC, Clang and MSVC.
+  Modify CI to compile with warnings-as-errors. (GH #2170 #2206 #2211 #2212)
+
+* Fix bugs linking to 3rd party libraries on Windows due to invalid
+  link specifiers. (GH #2210 #2215)
+
+* Add long input and NIST Monte-Carlo hash function tests.
+
 * Fix a bug introduced in 2.12.0 where ``TLS::Channel::is_active`` and
-  ``TLS::Channel::is_closed`` could simultanously return true.
+  ``TLS::Channel::is_closed`` could simultaneously return true.
   (GH #2174 #2171)
 
 * Use ``std::shared_ptr`` instead of ``boost::shared_ptr`` in some examples.

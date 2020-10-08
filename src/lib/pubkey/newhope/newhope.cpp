@@ -17,6 +17,11 @@
 
 namespace Botan {
 
+newhope_poly::~newhope_poly()
+   {
+   secure_scrub_memory(coeffs, sizeof(coeffs));
+   }
+
 typedef newhope_poly poly;
 
 namespace {
@@ -45,7 +50,7 @@ inline uint16_t barrett_reduce(uint16_t a)
    {
    uint32_t u = (static_cast<uint32_t>(a) * 5) >> 16;
    u *= PARAM_Q;
-   a -= u;
+   a = static_cast<uint16_t>(a - u);
    return a;
    }
 
