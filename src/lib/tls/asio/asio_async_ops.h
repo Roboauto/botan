@@ -170,7 +170,7 @@ class AsyncReadOperation : public AsyncBase<Handler, typename Stream::executor_t
                m_decodedBytes = m_stream.copy_received_data(m_buffers);
                }
 
-            if(!isContinuation)
+            else if(!isContinuation)
                {
                // Make sure the handler is not called without an intermediate initiating function.
                // "Reading" into a zero-byte buffer will complete immediately.

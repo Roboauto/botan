@@ -916,7 +916,7 @@ class Stream
 
       void armRepeatHandshake(const std::shared_ptr<detail::AsyncHandshakeOperation<Stream>>& aho)
          {
-         repeatHandshake_.expires_from_now(boost::posix_time::milliseconds(25));
+         repeatHandshake_.expires_from_now(boost::posix_time::milliseconds(50));
          repeatHandshake_.async_wait([this, aho](const boost::system::error_code& errc)
             {
             if(errc || aborted_)
