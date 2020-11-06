@@ -1,6 +1,59 @@
 Release Notes
 ========================================
 
+Version 2.17.0, 2020-11-05
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* Fix a bug in ECDSA which could occur when the group size and hash length
+  differ. In this case, on occasion the generated signature would not be
+  accepted by other ECDSA implementations. This was particularly likely to
+  affect users of 160-bit or 239-bit curves. (GH #2433 #2415)
+
+* Fix a bug in ECDSA verification when the public key was chosen to be
+  a small multiple of the group generator. In that case, verification
+  would fail even if the signature was actually valid. (GH #2425)
+
+* SIV's functionality of supporting multiple associated data inputs has been
+  generalized onto the AEAD_Mode interface. However at the moment SIV is the
+  only AEAD implemented which supports more than one AD. (GH #2440)
+
+* The contents of ASN.1 headers ``asn1_str.h``, ``asn1_time.h``, ``asn1_oid.h``
+  and ``alg_id.h`` have been moved to ``asn1_obj.h``. The header files remain
+  but simply forward the include to ``asn1_obj.h``. These now-empty header files
+  are deprecated, and will be removed in a future major release. (GH #2441)
+
+* The contents of X.509/PKIX headers ``asn1_attribute.h`` ``asn1_alt_name.h``
+  ``name_constraint.h`` ``x509_dn.h`` ``cert_status.h`` and ``key_constraint.h``
+  have been merged into ``pkix_enums.h`` (for enumerations) and ``pkix_types.h``
+  (for all other definitions). The previous header files remain but simply
+  forward the include to the new header containing the definition. These
+  now-empty header files are deprecated, and will be removed in a future major
+  release. (GH #2441)
+
+* A number of other headers including those related to HOTP/TOTP, XMSS,
+  PKCS11, PSK_DB have also been merged. Any now deprecated/empty headers
+  simply include the new header and issue a deprecation warning.
+  (GH #2443 #2446 #2447 2448 #2449)
+
+* Small optimizations in the non-hardware assisted AES key generation
+  code path (GH #2417 #2418)
+
+* Move the GHASH code to a new module in utils, making it possible
+  to build GMAC support without requiring GCM (GH #2416)
+
+* Add more detection logic for AVX-512 features (GH #2430)
+
+* Avoid std::is_pod which is deprecated in C++20 (GH #2429)
+
+* Fix a bug parsing deeply nested cipher names (GH #2426)
+
+* Add support for ``aarch64_be`` target CPU (GH #2422)
+
+* Fix order of linker flags so they are always applied effectively (GH #2420)
+
+* Prevent requesting DER encoding of signatures when the algorithm
+  did not support it (GH #2419)
+
 Version 2.16.0, 2020-10-06
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
