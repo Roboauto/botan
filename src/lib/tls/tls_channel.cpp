@@ -386,8 +386,10 @@ size_t Channel::received_data(const uint8_t input[], size_t input_size)
                   {
                   if(record.version() != pending->version())
                      {
-                     throw TLS_Exception(Alert::PROTOCOL_VERSION,
-                                         "Received unexpected record version");
+                      if (!m_is_datagram || !m_sequence_numbers->already_seen(record.sequence())) {
+                          throw TLS_Exception(Alert::PROTOCOL_VERSION,
+                              "Received unexpected record version");
+                      }
                      }
                   }
                }
