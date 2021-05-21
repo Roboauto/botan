@@ -333,6 +333,9 @@ def process_command_line(args): # pylint: disable=too-many-locals,too-many-state
     target_group.add_option('--ldflags', metavar='FLAGS',
                             help='set linker flags', default=None)
 
+    target_group.add_option('--extra-libs', metavar='LIBS',
+                            help='specify extra libraries to link against', default='')
+
     target_group.add_option('--ar-command', dest='ar_command', metavar='AR', default=None,
                             help='set path to static archive creator')
 
@@ -341,6 +344,9 @@ def process_command_line(args): # pylint: disable=too-many-locals,too-many-state
 
     target_group.add_option('--msvc-runtime', metavar='RT', default=None,
                             help='specify MSVC runtime (MT, MD, MTd, MDd)')
+
+    target_group.add_option('--compiler-cache',
+                            help='specify a compiler cache to use')
 
     target_group.add_option('--with-endian', metavar='ORDER', default=None,
                             help='override byte order guess')
@@ -1988,6 +1994,28 @@ def create_template_vars(source_paths, build_paths, options, modules, cc, arch, 
             return p
         return os.path.join(options.prefix or osinfo.install_root, p)
 
+    def choose_python_exe():
+        exe = sys.executable
+
+        if options.os == 'mingw':  # mingw doesn't handle the backslashes in the absolute path well
+            return exe.replace('\\', '/')
+
+        return exe
+
+    def choose_cxx_exe():
+        cxx = options.compiler_binary or cc.binary_name
+
+        if options.compiler_cache is None:
+            return cxx
+        else:
+            return '%s %s' % (options.compiler_cache, cxx)
+
+    def extra_libs(libs, cc):
+        if libs is None:
+            return ''
+
+        return ' '.join([(cc.add_lib_option % lib) for lib in libs.split(',') if lib != ''])
+
     variables = {
         'version_major':  Version.major(),
         'version_minor':  Version.minor(),
@@ -2086,11 +2114,11 @@ def create_template_vars(source_paths, build_paths, options, modules, cc, arch, 
 
         'mp_bits': choose_mp_bits(),
 
-        'python_exe': os.path.basename(sys.executable),
+        'python_exe': choose_python_exe(),
         'python_version': options.python_version,
         'install_python_module': not options.no_install_python_module,
 
-        'cxx': (options.compiler_binary or cc.binary_name),
+        'cxx': choose_cxx_exe(),
         'cxx_abi_flags': cc.mach_abi_link_flags(options),
         'linker': cc.linker_name or '$(CXX)',
         'make_supports_phony': osinfo.basename != 'windows',
@@ -2112,15 +2140,16 @@ def create_template_vars(source_paths, build_paths, options, modules, cc, arch, 
         'cc_sysroot': sysroot_option(),
         'cc_compile_flags': options.cxxflags or cc.cc_compile_flags(options),
         'ldflags': options.ldflags or '',
+        'extra_libs': extra_libs(options.extra_libs, cc),
         'cc_warning_flags': cc.cc_warning_flags(options),
         'output_to_exe': cc.output_to_exe,
         'cc_macro': cc.macro_name,
 
         'visibility_attribute': cc.gen_visibility_attribute(options),
 
-        'lib_link_cmd': cc.so_link_command_for(osinfo.basename, options) + ' ' + external_link_cmd(),
-        'exe_link_cmd': cc.binary_link_command_for(osinfo.basename, options) + ' ' + external_link_cmd(),
-        'post_link_cmd': '',
+        'lib_link_cmd': cc.so_link_command_for(osinfo.basename, options),
+        'exe_link_cmd': cc.binary_link_command_for(osinfo.basename, options),
+        'external_link_cmd': external_link_cmd(),
 
         'ar_command': ar_command(),
         'ar_options': options.ar_options or cc.ar_options or osinfo.ar_options,
@@ -2986,6 +3015,16 @@ def canonicalize_options(options, info_os, info_arch):
     # Set default fuzzing lib
     if options.build_fuzzers == 'libfuzzer' and options.fuzzer_lib is None:
         options.fuzzer_lib = 'Fuzzer'
+
+    if options.ldflags is not None:
+        extra_libs = []
+        link_to_lib = re.compile('^-l(.*)')
+        for flag in options.ldflags.split(' '):
+            match = link_to_lib.match(flag)
+            if match:
+                extra_libs.append(match.group(1))
+
+        options.extra_libs += ','.join(extra_libs)
 
 # Checks user options for consistency
 # This method DOES NOT change options on behalf of the user but explains

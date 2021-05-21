@@ -20,8 +20,8 @@ LDFLAGS        = %{ldflags}
 
 EXE_LINK_CMD   = %{exe_link_cmd}
 
-LIB_LINKS_TO   = %{link_to}
-EXE_LINKS_TO   = %{link_to_botan} $(LIB_LINKS_TO)
+LIB_LINKS_TO   = %{external_link_cmd} %{link_to}
+EXE_LINKS_TO   = %{link_to_botan} $(LIB_LINKS_TO) %{extra_libs}
 
 BUILD_FLAGS    = $(ABI_FLAGS) $(LANG_FLAGS) $(CXXFLAGS) $(WARN_FLAGS)
 
@@ -48,19 +48,19 @@ docs: %{doc_stamp_file}
 %{endif}
 
 %{doc_stamp_file}: %{doc_dir}/*.rst %{doc_dir}/api_ref/*.rst %{doc_dir}/dev_ref/*.rst
-	$(PYTHON_EXE) $(SCRIPTS_DIR)/build_docs.py --build-dir="%{build_dir}"
+	"$(PYTHON_EXE)" "$(SCRIPTS_DIR)/build_docs.py" --build-dir="%{build_dir}"
 
 clean:
-	$(PYTHON_EXE) $(SCRIPTS_DIR)/cleanup.py --build-dir="%{build_dir}"
+	"$(PYTHON_EXE)" "$(SCRIPTS_DIR)/cleanup.py" --build-dir="%{build_dir}"
 
 distclean:
-	$(PYTHON_EXE) $(SCRIPTS_DIR)/cleanup.py --build-dir="%{build_dir}" --distclean
+	"$(PYTHON_EXE)" "$(SCRIPTS_DIR)/cleanup.py" --build-dir="%{build_dir}" --distclean
 
 install: %{install_targets}
-	$(PYTHON_EXE) $(SCRIPTS_DIR)/install.py --prefix="%{prefix}" --build-dir="%{build_dir}" --bindir=%{bindir} --libdir=%{libdir} --docdir=%{docdir} --includedir=%{includedir}
+	"$(PYTHON_EXE)" "$(SCRIPTS_DIR)/install.py" --prefix="%{prefix}" --build-dir="%{build_dir}" --bindir="%{bindir}" --libdir="%{libdir}" --docdir="%{docdir}" --includedir="%{includedir}"
 
 check: tests
-	$(PYTHON_EXE) $(SCRIPTS_DIR)/check.py --build-dir="%{build_dir}"
+	"$(PYTHON_EXE)" "$(SCRIPTS_DIR)/check.py" --build-dir="%{build_dir}"
 
 # Object Files
 LIBOBJS = %{join lib_objs}
