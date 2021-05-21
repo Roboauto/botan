@@ -360,7 +360,7 @@ class AsyncHandshakeOperation
                            m_stream.m_core.m_isAlerted = false;
                            }
                         };
-                     this->operator()({}, 0); // Continue
+                     this->operator()(m_ec, 0); // Continue
                      };
                   }
                catch(const TLS_Exception& e)

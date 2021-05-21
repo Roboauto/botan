@@ -889,10 +889,10 @@ class Stream
        */
       void process_encrypted_data(const boost::asio::const_buffer& read_buffer, boost::system::error_code& ec)
          {
-         try_with_error_code([&]
-            {
+         //try_with_error_code([&]
+         //   {
             native_handle()->received_data(static_cast<const uint8_t*>(read_buffer.data()), read_buffer.size());
-            }, ec);
+         //   }, ec);
          }
 
       //! @brief Catch exceptions and set an error_code
