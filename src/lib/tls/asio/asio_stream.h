@@ -299,7 +299,11 @@ class Stream
             auto interrupt = [this, handler, inception](const boost::system::error_code& errc) mutable
                {
                handler(errc);
-               inception = nullptr;
+               // The hack below is required to release resources correctly
+               boost::asio::post(get_executor(), [inception = std::move(inception)]() mutable 
+                    {
+                        inception = nullptr;
+                    });
                };
 
             inception->start(interrupt);
