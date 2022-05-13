@@ -1,7 +1,9 @@
 #pragma once
 
 #include <stdint.h>
-#include <boost/asio.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/ip/udp.hpp>
+#include <boost/asio/write.hpp>
 
 template <typename SocketType>
 struct SocketWrapper
