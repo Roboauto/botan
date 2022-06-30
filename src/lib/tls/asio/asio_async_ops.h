@@ -348,7 +348,7 @@ class AsyncHandshakeOperation
                         if(m_stream.m_core.m_alert.is_fatal())
                            {
                            m_has_exception_cat = true;
-                           boost::system::error_code ecTmp = boost::system::error_code(m_stream.m_core.m_alert.type(), BotanAlertCategory());
+                           boost::system::error_code ecTmp = boost::system::error_code(m_stream.m_core.m_alert.type(), botan_alert_category());
                            m_last_cat = BotanExceptionCategory(ecTmp.message());
                            errorState_ = true;
                            write();
