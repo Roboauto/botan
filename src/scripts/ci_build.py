@@ -85,7 +85,7 @@ def determine_flags(target, target_os, target_cpu, target_cc, cc_bin,
     if ccache is not None:
         flags += ['--no-store-vc-rev', '--compiler-cache=%s' % (ccache)]
 
-    if target_os != 'osx' and not disable_werror:
+    if target_os != 'osx' and target != 'gcc4.8' and not disable_werror:
         flags += ['--werror-mode']
 
     if target_cpu is not None:
@@ -96,6 +96,9 @@ def determine_flags(target, target_os, target_cpu, target_cc, cc_bin,
 
     if target in ['minimized']:
         flags += ['--minimized-build', '--enable-modules=system_rng,sha2_32,sha2_64,aes']
+
+    if target in ['amalgamation']:
+        flags += ['--amalgamation']
 
     if target in ['bsi', 'nist']:
         # tls is optional for bsi/nist but add it so verify tests work with these minimized configs
@@ -131,6 +134,9 @@ def determine_flags(target, target_os, target_cpu, target_cc, cc_bin,
 
     if target == 'fuzzers':
         flags += ['--unsafe-fuzzer-mode']
+
+    if target == 'gcc4.8':
+        cc_bin = 'g++-4.8'
 
     if target in ['fuzzers', 'coverage']:
         flags += ['--build-fuzzers=test']
@@ -249,12 +255,6 @@ def determine_flags(target, target_os, target_cpu, target_cc, cc_bin,
         if target_os == 'linux':
             flags += ['--with-lzma']
 
-        if target_os == 'linux':
-            if target not in ['sanitizer', 'valgrind', 'minimized']:
-                # Avoid OpenSSL when using dynamic checkers, or on OS X where it sporadically
-                # is not installed on the CI image
-                flags += ['--with-openssl']
-
         if target in ['coverage']:
             flags += ['--with-tpm']
             test_cmd += ['--run-online-tests']
@@ -361,8 +361,6 @@ def parse_args(args):
 
     parser.add_option('--with-debug', action='store_true', default=False,
                       help='Include debug information')
-    parser.add_option('--amalgamation', action='store_true', default=False,
-                      help='Build via amalgamation')
     parser.add_option('--disable-shared', action='store_true', default=False,
                       help='Disable building shared libraries')
     parser.add_option('--disabled-tests', metavar='DISABLED_TESTS', default=[], action='append',
@@ -422,6 +420,7 @@ def main(args=None):
 
     if args is None:
         args = sys.argv
+
     print("Invoked as '%s'" % (' '.join(args)))
     (options, args) = parse_args(args)
 
@@ -550,7 +549,7 @@ def main(args=None):
                          os.path.join(root_dir, 'fuzzer_corpus'),
                          os.path.join(root_dir, 'build/fuzzer')])
 
-        if target in ['shared', 'coverage'] and options.os != 'windows':
+        if target in ['shared', 'gcc4.8', 'coverage'] and options.os != 'windows':
             botan_exe = os.path.join(root_dir, 'botan-cli.exe' if options.os == 'windows' else 'botan')
 
             args = ['--threads=%d' % (options.build_jobs)]
@@ -571,7 +570,7 @@ def main(args=None):
                 if use_python3:
                     cmds.append(['python3', '-b', python_tests])
 
-        if target in ['shared', 'static', 'bsi', 'nist']:
+        if target in ['shared', 'static', 'gcc4.8', 'bsi', 'nist']:
             cmds.append(make_cmd + ['install'])
             build_config = os.path.join(root_dir, 'build', 'build_config.json')
             cmds.append([py_interp, os.path.join(root_dir, 'src/scripts/ci_check_install.py'), build_config])
