@@ -270,7 +270,11 @@ template<class Stream
 class AsyncHandshakeOperation
    {
    private:
-      static inline boost::asio::thread_pool handshakeThreadPool_{ std::thread::hardware_concurrency() ? std::thread::hardware_concurrency() : 16 };
+      static boost::asio::thread_pool& handshakeThreadPool()
+         {
+            static boost::asio::thread_pool pool{ std::thread::hardware_concurrency() ? std::thread::hardware_concurrency() : 16 };
+            return pool;
+         }
    public:
       /**
        * Construct and invoke an AsyncHandshakeOperation.
@@ -325,7 +329,7 @@ class AsyncHandshakeOperation
             {
             // Provide encrypted TLS data received from the network to TLS::Channel for decryption
             auto work = std::make_shared<boost::asio::executor_work_guard<typename Stream::executor_type>>(m_stream.get_executor());
-            boost::asio::post(handshakeThreadPool_, [this, bytesTransferred, work, ec] () mutable
+            boost::asio::post(handshakeThreadPool(), [this, bytesTransferred, work, ec] () mutable
                {
                std::function<void()> result;
                try
