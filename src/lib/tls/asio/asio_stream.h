@@ -28,8 +28,8 @@
    // We need to define BOOST_ASIO_DISABLE_SERIAL_PORT before any asio imports. Otherwise asio will include <termios.h>,
    // which interferes with Botan's amalgamation by defining macros like 'B0' and 'FF1'.
    #define BOOST_ASIO_DISABLE_SERIAL_PORT
-   #include <boost/asio.hpp>
    #include <boost/beast/core.hpp>
+   #include <boost/container/devector.hpp>
 
    #include <algorithm>
    #include <memory>
@@ -55,19 +55,9 @@ class Stream;
  * future major version of Botan will therefor consume instances of this class
  * as a std::unique_ptr. The current usage of std::shared_ptr is erratic.
  */
-class StreamCallbacks : public Callbacks {
+class StreamCallbacksBase : public Callbacks {
    public:
-      StreamCallbacks() {}
-
-      void tls_emit_data(std::span<const uint8_t> data) final {
-         m_send_buffer.commit(boost::asio::buffer_copy(m_send_buffer.prepare(data.size()),
-                                                       boost::asio::buffer(data.data(), data.size())));
-      }
-
-      void tls_record_received(uint64_t, std::span<const uint8_t> data) final {
-         m_receive_buffer.commit(boost::asio::buffer_copy(m_receive_buffer.prepare(data.size()),
-                                                          boost::asio::const_buffer(data.data(), data.size())));
-      }
+      StreamCallbacksBase() = default;
 
       bool tls_peer_closed_connection() final {
          // Instruct the TLS implementation to reply with our close_notify to obtain
@@ -112,16 +102,6 @@ class StreamCallbacks : public Callbacks {
 
       void set_context(std::weak_ptr<Botan::TLS::Context> context) { m_context = std::move(context); }
 
-      void consume_send_buffer() { m_send_buffer.consume(m_send_buffer.size()); }
-
-      boost::beast::flat_buffer& send_buffer() { return m_send_buffer; }
-
-      const boost::beast::flat_buffer& send_buffer() const { return m_send_buffer; }
-
-      boost::beast::flat_buffer& receive_buffer() { return m_receive_buffer; }
-
-      const boost::beast::flat_buffer& receive_buffer() const { return m_receive_buffer; }
-
       bool shutdown_received() const {
          return m_alert_from_peer && m_alert_from_peer->type() == AlertType::CloseNotify;
       }
@@ -130,10 +110,102 @@ class StreamCallbacks : public Callbacks {
 
    private:
       std::optional<Alert> m_alert_from_peer;
+      std::weak_ptr<TLS::Context> m_context;
+};
+
+class StreamCallbacksTLS : public StreamCallbacksBase {
+      void tls_emit_data(std::span<const uint8_t> data) final {
+         m_send_buffer.commit(boost::asio::buffer_copy(m_send_buffer.prepare(data.size()),
+                                                       boost::asio::buffer(data.data(), data.size())));
+      }
+
+      void tls_record_received(uint64_t, std::span<const uint8_t> data) final {
+         m_receive_buffer.commit(boost::asio::buffer_copy(m_receive_buffer.prepare(data.size()),
+                                                          boost::asio::const_buffer(data.data(), data.size())));
+      }
+
+   public:
+      StreamCallbacksTLS(size_t bufferSize = MAX_CIPHERTEXT_SIZE) : m_input_buffer(bufferSize) {}
+
+      size_t available() const { return m_receive_buffer.size(); }
+
+      size_t send_count_readable_bytes() const { return m_send_buffer.size(); }
+
+      void consume_send_buffer(size_t bytes) { m_send_buffer.consume(bytes); }
+
+      bool has_data_to_send() const { return m_send_buffer.size(); }
+
+      bool has_received_data() const { return available(); }
+
+      boost::asio::const_buffer send_buffer() const { return m_send_buffer.data(); }
+
+      boost::asio::const_buffer receive_buffer_data() const { return m_receive_buffer.data(); }
+
+      void consume_receive_buffer(size_t bytes) { m_receive_buffer.consume(bytes); }
+
+      boost::asio::mutable_buffer input_buffer() { return boost::asio::buffer(m_input_buffer); }
+
+   private:
+      std::vector<uint8_t> m_input_buffer;  // Buffer used for receiving data (before decrypt)
       boost::beast::flat_buffer m_receive_buffer;
       boost::beast::flat_buffer m_send_buffer;
+};
 
-      std::weak_ptr<TLS::Context> m_context;
+class StreamCallbacksDTLS : public StreamCallbacksBase {
+      void tls_emit_data(std::span<const uint8_t> data) final {
+         m_send_buffer.push_back(std::vector<uint8_t>(data.begin(), data.end()));
+      }
+
+      void tls_record_received(uint64_t, std::span<const uint8_t> data) final {
+         m_receive_buffer.push_back(std::vector<uint8_t>(data.begin(), data.end()));
+      }
+
+   public:
+      StreamCallbacksDTLS(size_t mtu = MAX_CIPHERTEXT_SIZE) : m_input_buffer(mtu) {}
+
+      size_t available() const { return m_receive_buffer.empty() ? 0 : m_receive_buffer.front().size(); }
+
+      size_t send_count_readable_bytes() const { return m_send_buffer.empty() ? 0 : m_send_buffer.front().size(); }
+
+      void consume_send_buffer(size_t bytes) {
+         // pop full messages
+         size_t consumed = 0;
+         while(bytes > consumed && !m_send_buffer.empty()) {
+            consumed += m_send_buffer.front().size();
+            m_send_buffer.pop_front();
+         }
+      }
+
+      bool has_data_to_send() const { return !m_send_buffer.empty(); }
+
+      bool has_received_data() const { return available(); }
+
+      boost::asio::const_buffer send_buffer() const {
+         return m_send_buffer.empty() ? boost::asio::const_buffer()
+                                      : boost::asio::const_buffer(boost::asio::buffer(m_send_buffer.front()));
+      }
+
+      boost::asio::const_buffer receive_buffer_data() const {
+         return m_receive_buffer.empty() ? boost::asio::const_buffer()
+                                         : boost::asio::const_buffer(boost::asio::buffer(m_receive_buffer.front()));
+      };
+
+      void consume_receive_buffer(size_t bytes) {
+         // pop full messages
+         size_t consumed = 0;
+         while(bytes > consumed && !m_receive_buffer.empty()) {
+            consumed += m_receive_buffer.front().size();
+            m_receive_buffer.pop_front();
+         }
+      }
+
+      boost::asio::mutable_buffer input_buffer() { return boost::asio::buffer(m_input_buffer); }
+
+   private:
+      std::vector<uint8_t> m_input_buffer;  // Buffer used for receiving data (before decrypt)
+      // deque has poor performance on some compilers, so we use devector instead
+      boost::container::devector<std::vector<uint8_t>> m_receive_buffer;  // Decrypted data
+      boost::container::devector<std::vector<uint8_t>> m_send_buffer;
 };
 
 namespace detail {
@@ -159,6 +231,9 @@ class Stream {
          boost::asio::default_completion_token_t<boost::beast::executor_type<StreamLayer>>;
 
    public:
+      static constexpr bool m_is_dtls = !std::is_same_v<typename StreamLayer::protocol_type, boost::asio::ip::tcp>;
+      using StreamCallbacksType = std::conditional_t<m_is_dtls, StreamCallbacksDTLS, StreamCallbacksTLS>;
+
       //! \name construction
       //! @{
 
@@ -175,12 +250,10 @@ class Stream {
        * @param args Arguments to be forwarded to the construction of the next layer.
        */
       template <typename... Args>
-      explicit Stream(std::shared_ptr<Context> context, std::shared_ptr<StreamCallbacks> callbacks, Args&&... args) :
-            m_context(std::move(context)),
-            m_nextLayer(std::forward<Args>(args)...),
-            m_core(std::move(callbacks)),
-            m_input_buffer_space(MAX_CIPHERTEXT_SIZE, '\0'),
-            m_input_buffer(m_input_buffer_space.data(), m_input_buffer_space.size()) {
+      explicit Stream(std::shared_ptr<Context> context,
+                      std::shared_ptr<StreamCallbacksType> callbacks,
+                      Args&&... args) :
+            m_context(std::move(context)), m_nextLayer(std::forward<Args>(args)...), m_core(std::move(callbacks)) {
          m_core->set_context(m_context);
       }
 
@@ -192,7 +265,7 @@ class Stream {
        */
       template <typename... Args>
       explicit Stream(std::shared_ptr<Context> context, Args&&... args) :
-            Stream(std::move(context), std::make_shared<StreamCallbacks>(), std::forward<Args>(args)...) {}
+            Stream(std::move(context), std::make_shared<StreamCallbacksType>(), std::forward<Args>(args)...) {}
 
       /**
        * @brief Construct a new Stream
@@ -208,7 +281,7 @@ class Stream {
       template <typename Arg>
       explicit Stream(Arg&& arg,
                       std::shared_ptr<Context> context,
-                      std::shared_ptr<StreamCallbacks> callbacks = std::make_shared<StreamCallbacks>()) :
+                      std::shared_ptr<StreamCallbacksType> callbacks = std::make_shared<StreamCallbacksType>()) :
             Stream(std::move(context), std::move(callbacks), std::forward<Arg>(arg)) {}
 
       virtual ~Stream() = default;
@@ -242,6 +315,13 @@ class Stream {
       using native_handle_type = typename std::add_pointer<ChannelT>::type;
 
       native_handle_type native_handle() {
+         if(m_native_handle == nullptr) {
+            throw Invalid_State("Invalid handshake state");
+         }
+         return m_native_handle.get();
+      }
+
+      const native_handle_type native_handle() const {
          if(m_native_handle == nullptr) {
             throw Invalid_State("Invalid handshake state");
          }
@@ -377,14 +457,41 @@ class Stream {
       auto async_handshake(Botan::TLS::Connection_Side side,
                            CompletionToken&& completion_token = default_completion_token{}) {
          return boost::asio::async_initiate<CompletionToken, void(boost::system::error_code)>(
-            [this](auto&& completion_handler, TLS::Connection_Side connection_side) {
-               using completion_handler_t = std::decay_t<decltype(completion_handler)>;
-
+            [this]<typename CallbackType>(CallbackType&& completion_handler, TLS::Connection_Side connection_side) {
                boost::system::error_code ec;
                setup_native_handle(connection_side, ec);
-
-               detail::AsyncHandshakeOperation<completion_handler_t, Stream> op{
-                  std::forward<completion_handler_t>(completion_handler), *this, ec};
+               boost::asio::co_spawn(
+                  get_executor(),
+                  [this]() mutable -> boost::asio::awaitable<boost::system::error_code> {
+                     if constexpr(m_is_dtls) {
+                        boost::asio::steady_timer handshake_max_time_guard{get_executor()};
+                        handshake_max_time_guard.expires_after(std::chrono::seconds{6});
+                        using namespace boost::asio::experimental::awaitable_operators;
+                        std::variant<boost::system::error_code, std::monostate> handshake_result =
+                           co_await (detail::async_handshake_awaitable_dtls<Stream>(*this) ||
+                                     handshake_max_time_guard.async_wait(boost::asio::use_awaitable));
+                        if(handshake_result.index() == 0) {
+                           co_return std::get<0>(handshake_result);
+                        } else {
+                           co_return boost::system::error_code{boost::asio::error::timed_out};
+                        }
+                     } else {
+                        co_return co_await detail::async_handshake_awaitable<Stream>(*this);
+                     }
+                  },
+                  [completion_handler = std::forward<CallbackType>(completion_handler)](
+                     std::exception_ptr eptr, const boost::system::error_code& ec) {
+                     boost::system::error_code tmp_code = ec;
+                     if(eptr) {
+                        try {
+                        } catch(boost::system::system_error& e) {
+                           tmp_code = e.code();
+                        } catch(...) {
+                           std::rethrow_exception(eptr);
+                        }
+                     }
+                     completion_handler(tmp_code);
+                  });
             },
             completion_token,
             side);
@@ -434,6 +541,11 @@ class Stream {
          shutdown(ec);
          boost::asio::detail::throw_error(ec, "shutdown");
       }
+
+      size_t available() const { return m_core->available(); }
+
+      // TODO: should return error?
+      size_t available(boost::system::error_code& /*ec*/) const { return m_core->available(); }
 
    private:
       /**
@@ -512,8 +624,8 @@ class Stream {
          if(has_received_data()) {
             return copy_received_data(buffers);
          }
-
-         boost::asio::const_buffer read_buffer{input_buffer().data(), m_nextLayer.read_some(input_buffer(), ec)};
+         size_t bytes_read = m_nextLayer.read_some(input_buffer(), ec);
+         boost::asio::const_buffer read_buffer(input_buffer().data(), bytes_read);
          if(ec) {
             return 0;
          }
@@ -611,7 +723,7 @@ class Stream {
                if(ec) {
                   // we cannot be sure how many bytes were committed here so clear the send_buffer and let the
                   // AsyncWriteOperation call the handler with the error_code set
-                  m_core->send_buffer().consume(m_core->send_buffer().size());
+                  consume_send_buffer(m_core->send_count_readable_bytes());
                }
 
                detail::AsyncWriteOperation<completion_handler_t, Stream> op{
@@ -661,15 +773,21 @@ class Stream {
       friend class detail::AsyncReadOperation;
       template <class H, class S, class A>
       friend class detail::AsyncWriteOperation;
-      template <class H, class S, class A>
-      friend class detail::AsyncHandshakeOperation;
 
-      const boost::asio::mutable_buffer& input_buffer() { return m_input_buffer; }
+      friend boost::asio::awaitable<boost::system::error_code> detail::async_handshake_awaitable_dtls<Stream>(
+         Stream& stream);
 
-      boost::asio::const_buffer send_buffer() const { return m_core->send_buffer().data(); }
+      friend boost::asio::awaitable<boost::system::error_code> detail::async_handshake_awaitable<Stream>(Stream& stream);
+
+      friend boost::asio::awaitable<std::pair<size_t, boost::system::error_code>> detail::async_write_some_awaitable<Stream>(
+         Stream& stream);
+
+      boost::asio::mutable_buffer input_buffer() { return m_core->input_buffer(); }
+
+      boost::asio::const_buffer send_buffer() const { return m_core->send_buffer(); }
 
       //! @brief Check if decrypted data is available in the receive buffer
-      bool has_received_data() const { return m_core->receive_buffer().size() > 0; }
+      bool has_received_data() const { return m_core->has_received_data(); }
 
       //! @brief Copy decrypted data into the user-provided buffer
       template <typename MutableBufferSequence>
@@ -678,16 +796,19 @@ class Stream {
          // the user's desired target buffer once a read is started, and reading directly into that buffer in tls_record
          // received. However, we need to deal with the case that the receive buffer provided by the caller is smaller
          // than the decrypted record, so this optimization might not be worth the additional complexity.
-         const auto copiedBytes = boost::asio::buffer_copy(buffers, m_core->receive_buffer().data());
-         m_core->receive_buffer().consume(copiedBytes);
+         const auto copiedBytes = boost::asio::buffer_copy(buffers, m_core->receive_buffer_data());
+         m_core->consume_receive_buffer(copiedBytes);
          return copiedBytes;
       }
 
       //! @brief Check if encrypted data is available in the send buffer
-      bool has_data_to_send() const { return m_core->send_buffer().size() > 0; }
+      bool has_data_to_send() const { return m_core->has_data_to_send() > 0; }
 
       //! @brief Mark bytes in the send buffer as consumed, removing them from the buffer
-      void consume_send_buffer(std::size_t bytesConsumed) { m_core->send_buffer().consume(bytesConsumed); }
+      void consume_send_buffer(std::size_t bytesConsumed) { m_core->consume_send_buffer(bytesConsumed); }
+
+      //! @brief Mark bytes in the receive buffer as consumed, removing them from the buffer
+      void consume_receive_buffer(std::size_t bytesConsumed) { m_core->consume_receive_buffer(bytesConsumed); }
 
       /**
        * @brief Create the native handle.
@@ -707,21 +828,21 @@ class Stream {
             try_with_error_code(
                [&] {
                   if(side == Connection_Side::Client) {
-                     m_native_handle = std::unique_ptr<Client>(
-                        new Client(m_core,
-                                   m_context->m_session_manager,
-                                   m_context->m_credentials_manager,
-                                   m_context->m_policy,
-                                   m_context->m_rng,
-                                   m_context->m_server_info,
-                                   m_context->m_policy->latest_supported_version(false /* no DTLS */)));
+                     m_native_handle =
+                        std::unique_ptr<Client>(new Client(m_core,
+                                                           m_context->m_session_manager,
+                                                           m_context->m_credentials_manager,
+                                                           m_context->m_policy,
+                                                           m_context->m_rng,
+                                                           m_context->m_server_info,
+                                                           m_context->m_policy->latest_supported_version(m_is_dtls)));
                   } else {
                      m_native_handle = std::unique_ptr<Server>(new Server(m_core,
                                                                           m_context->m_session_manager,
                                                                           m_context->m_credentials_manager,
                                                                           m_context->m_policy,
                                                                           m_context->m_rng,
-                                                                          false /* no DTLS */));
+                                                                          m_is_dtls));
                   }
                },
                ec);
@@ -821,12 +942,8 @@ class Stream {
       std::shared_ptr<Context> m_context;
       StreamLayer m_nextLayer;
 
-      std::shared_ptr<StreamCallbacks> m_core;
+      std::shared_ptr<StreamCallbacksType> m_core;
       std::unique_ptr<ChannelT> m_native_handle;
-
-      // Buffer space used to read input intended for the core
-      std::vector<uint8_t> m_input_buffer_space;
-      const boost::asio::mutable_buffer m_input_buffer;
 };
 
 }  // namespace Botan::TLS
