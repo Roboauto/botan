@@ -343,10 +343,12 @@ size_t Channel_Impl_12::from_peer(std::span<const uint8_t> data) {
             if(m_has_been_closed) {
                throw TLS_Exception(Alert::UnexpectedMessage, "Received application data after connection closure");
             }
-            if(pending_state() != nullptr) {
+            // If we're in a handshake we can possibly ignore the data for DTLS. It's an error for TLS.
+            if(pending_state() == nullptr) {
+               process_application_data(record.sequence(), m_record_buf);
+            } else if(!m_is_datagram) {
                throw TLS_Exception(Alert::UnexpectedMessage, "Can't interleave application and handshake data");
             }
-            process_application_data(record.sequence(), m_record_buf);
          } else if(record.type() == Record_Type::Alert) {
             process_alert(m_record_buf);
          } else if(record.type() != Record_Type::Invalid) {
