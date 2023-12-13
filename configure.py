@@ -527,6 +527,11 @@ def process_command_line(args):
     build_group.add_option('--without-pkg-config', dest='with_pkg_config', action='store_false',
                            help=optparse.SUPPRESS_HELP)
 
+    build_group.add_option('--with-cmake-config', action='store_true', default=True,
+                           help=optparse.SUPPRESS_HELP)
+    build_group.add_option('--without-cmake-config', dest='with_cmake_config', action='store_false',
+                           help=optparse.SUPPRESS_HELP)
+
     docs_group = optparse.OptionGroup(parser, 'Documentation Options')
 
     docs_group.add_option('--with-documentation', action='store_true',
@@ -1979,7 +1984,7 @@ def generate_build_info(build_paths, modules, cc, arch, osinfo, options):
 
     return out
 
-def create_template_vars(source_paths, build_paths, options, modules, cc, arch, osinfo):
+def create_template_vars(source_paths, build_paths, options, modules, disabled_modules, cc, arch, osinfo):
     """
     Create the template variables needed to process the makefile, build.h, etc
     """
@@ -2281,6 +2286,7 @@ def create_template_vars(source_paths, build_paths, options, modules, cc, arch, 
         'optimize_for_size': options.optimize_for_size,
 
         'mod_list': sorted([m.basename for m in modules]),
+        'disabled_mod_list': sorted([m.basename for m in disabled_modules]),
     }
 
     variables['installed_include_dir'] = os.path.join(
@@ -2298,6 +2304,9 @@ def create_template_vars(source_paths, build_paths, options, modules, cc, arch, 
 
     if options.with_pkg_config:
         variables['botan_pkgconfig'] = os.path.join(build_paths.build_dir, 'botan-%d.pc' % (Version.major()))
+    if options.with_cmake_config:
+        variables['botan_cmake_config'] = os.path.join(build_paths.build_dir, 'cmake', 'botan-config.cmake')
+        variables['botan_cmake_version_config'] = os.path.join(build_paths.build_dir, 'cmake', 'botan-config-version.cmake')
 
     # The name is always set because Windows build needs it
     variables['static_lib_name'] = '%s%s.%s' % (variables['lib_prefix'], variables['libname'],
@@ -3345,9 +3354,10 @@ def do_io_for_build(cc, arch, osinfo, using_mods, info_modules, build_paths, sou
     write_template(in_build_dir('build.h'), in_build_data('buildh.in'))
     write_template(in_build_dir('botan.doxy'), in_build_data('botan.doxy.in'))
 
-    robust_makedirs(in_build_dir("cmake"))
-    write_template(in_build_dir('cmake/botan-config.cmake'), in_build_data('botan-config.cmake.in'))
-    write_template(in_build_dir('cmake/botan-config-version.cmake'), in_build_data('botan-config-version.cmake.in'))
+    if options.with_cmake_config:
+        robust_makedirs(in_build_dir("cmake"))
+        write_template(in_build_dir('cmake/botan-config.cmake'), in_build_data('botan-config.cmake.in'))
+        write_template(in_build_dir('cmake/botan-config-version.cmake'), in_build_data('botan-config-version.cmake.in'))
 
     if 'botan_pkgconfig' in template_vars:
         write_template(template_vars['botan_pkgconfig'], in_build_data('botan.pc.in'))
@@ -3576,11 +3586,12 @@ def main(argv):
     chooser = ModulesChooser(info_modules, module_policy, arch, osinfo, cc, cc_min_version, options)
     loaded_module_names = chooser.choose()
     using_mods = [info_modules[modname] for modname in loaded_module_names]
+    not_using_mods = [modinfo for modname, modinfo in info_modules.items() if modname not in loaded_module_names]
 
     build_paths = BuildPaths(source_paths, options, using_mods)
     build_paths.public_headers.append(os.path.join(build_paths.build_dir, 'build.h'))
 
-    template_vars = create_template_vars(source_paths, build_paths, options, using_mods, cc, arch, osinfo)
+    template_vars = create_template_vars(source_paths, build_paths, options, using_mods, not_using_mods, cc, arch, osinfo)
 
     # Now we start writing to disk
     do_io_for_build(cc, arch, osinfo, using_mods, info_modules, build_paths, source_paths, template_vars, options)

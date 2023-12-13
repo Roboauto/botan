@@ -5,7 +5,7 @@
 int main() {
    // Create a certificate store and add a locally trusted CA certificate
    Botan::Certificate_Store_In_Memory customStore;
-   customStore.add_certificate(Botan::X509_Certificate("ca.crt"));
+   customStore.add_certificate(Botan::X509_Certificate("root.crt"));
 
    // Additionally trust all system-specific CA certificates
    Botan::System_Certificate_Store systemStore;
@@ -20,11 +20,11 @@ int main() {
    // Optional: Set up restrictions, e.g. min. key strength, maximum age of OCSP responses
    Botan::Path_Validation_Restrictions restrictions;
 
-   // Optional: Specify usage type, compared against the key usage in endEntityCert
+   // Optional: Specify usage type, compared against the key usage in end_certs[0]
    Botan::Usage_Type usage = Botan::Usage_Type::UNSPECIFIED;
 
-   // Optional: Specify hostname, if not empty, compared against the DNS name in endEntityCert
-   std::string hostname = "";
+   // Optional: Specify hostname, if not empty, compared against the DNS name in end_certs[0]
+   std::string hostname;
 
    Botan::Path_Validation_Result validationResult =
       Botan::x509_path_validate(end_certs, restrictions, trusted_roots, hostname, usage);
