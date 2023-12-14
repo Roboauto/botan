@@ -275,6 +275,9 @@ template <class Stream>
 boost::asio::awaitable<std::pair<size_t, boost::system::error_code>> async_write_some_awaitable(Stream& stream) {
    size_t sent = 0;
    while(stream.has_data_to_send()) {
+      // If we have data to be sent to the peer, we do that now. Note that
+      // this might either be a flight in our handshake, or a TLS alert
+      // record if we decided to abort due to some failure.
       boost::system::error_code ec;
       auto written = co_await stream.next_layer().async_write_some(
          stream.send_buffer(), boost::asio::redirect_error(boost::asio::use_awaitable, ec));
@@ -293,16 +296,37 @@ boost::asio::awaitable<std::pair<size_t, boost::system::error_code>> async_write
    co_return std::make_pair(sent, boost::system::error_code{});
 }
 
+/**
+       * Perform a TLS handshake with the peer.
+       *
+       * Depending on the situation, this handler will:
+       *
+       * 1. Process TLS data received from the peer, and potentially:
+       *    * generate a response (another handshake flight, or an alert) or
+       *    * finalize the handshake,
+       * 2. Send pending data to the peer, or
+       * 3. Handle any pending TLS protocol errors and (if none were found) wait
+       *    for more data from the peer.
+       */
 template <class Stream>
 boost::asio::awaitable<boost::system::error_code> async_handshake_awaitable(Stream& stream) {
    boost::system::error_code ec;
-   while(!ec) {
+   while(!ec && !stream.native_handle()->is_handshake_complete()) {
       if(stream.has_data_to_send()) {
+         // If we have data to be sent to the peer, we do that now. Note that
+         // this might either be a flight in our handshake, or a TLS alert
+         // record if we decided to abort due to some failure.
          auto [written, writeEc] = co_await async_write_some_awaitable(stream);
          ec = writeEc;
       } else {
-         if(stream.native_handle()->is_active()) {
-            break;  // nothing to send and active connection -> we are done
+         // If we have no more data from the peer to process and no more data
+         // to be sent to the peer...
+
+         // ... we first ensure that no TLS protocol error was detected until now.
+         // Otherwise, the handshake is aborted with an error code.
+         stream.handle_tls_protocol_errors(ec);
+         if(ec) {
+            break;
          }
 
          size_t bytesRead = co_await stream.next_layer().async_read_some(
@@ -317,114 +341,47 @@ boost::asio::awaitable<boost::system::error_code> async_handshake_awaitable(Stre
    co_return ec;
 }
 
-      /**
-       * Perform a TLS handshake with the peer.
-       *
-       * Depending on the situation, this handler will:
-       *
-       * 1. Process TLS data received from the peer, and potentially:
-       *    * generate a response (another handshake flight, or an alert) or
-       *    * finalize the handshake,
-       * 2. Send pending data to the peer, or
-       * 3. Handle any pending TLS protocol errors and (if none were found) wait
-       *    for more data from the peer.
-       */
-//      void operator()(boost::system::error_code ec, std::size_t bytesTransferred, bool isContinuation = true) {
-//         reenter(this) {
-//            // Check whether we received a premature EOF from the next layer.
-//            // Note that the AsyncWriteOperation handles this internally; here
-//            // we only have to handle reading.
-//            if(ec == boost::asio::error::eof && !m_stream.shutdown_received()) {
-//               ec = StreamError::StreamTruncated;
-//            }
-//
-//            // If we received data from the peer, we hand it to the native
-//            // handle for processing. When enough bytes were received this will
-//            // result in the advancement of the handshake state and produce data
-//            // in the output buffer.
-//            if(!ec && bytesTransferred > 0) {
-//               boost::asio::const_buffer read_buffer{m_stream.input_buffer().data(), bytesTransferred};
-//               m_stream.process_encrypted_data(read_buffer);
-//            }
-//
-//            // If we have data to be sent to the peer, we do that now. Note that
-//            // this might either be a flight in our handshake, or a TLS alert
-//            // record if we decided to abort due to some failure.
-//            if(!ec && m_stream.has_data_to_send()) {
-//               // Note: we construct `AsyncWriteOperation` with 0 as its last parameter (`plainBytesTransferred`). This
-//               // operation will eventually call `*this` as its own handler, passing the 0 back to this call operator.
-//               // This is necessary because the check of `bytesTransferred > 0` assumes that `bytesTransferred` bytes
-//               // were just read and are available in input_buffer for further processing.
-//               AsyncWriteOperation<AsyncHandshakeOperation<typename std::decay<Handler>::type, Stream, Allocator>,
-//                                   Stream,
-//                                   Allocator>
-//                  op{std::move(*this), m_stream, 0};
-//               return;
-//            }
-//
-//            // If we have no more data from the peer to process and no more data
-//            // to be sent to the peer...
-//            if(!ec && !m_stream.native_handle()->is_handshake_complete()) {
-//               // ... we first ensure that no TLS protocol error was detected until now.
-//               // Otherwise the handshake is aborted with an error code.
-//               m_stream.handle_tls_protocol_errors(ec);
-//
-//               if(!ec) {
-//                  // The handshake is neither finished nor aborted. Wait for
-//                  // more data from the peer.
-//                  m_stream.next_layer().async_read_some(m_stream.input_buffer(), std::move(*this));
-//                  return;
-//               }
-//            }
-//
-//            if(!isContinuation) {
-//               // Make sure the handler is not called without an intermediate initiating function.
-//               // "Reading" into a zero-byte buffer will complete immediately.
-//               m_ec = ec;
-//               yield m_stream.next_layer().async_read_some(boost::asio::mutable_buffer(), std::move(*this));
-//               ec = m_ec;
-//            }
-//
-//            this->complete_now(ec);
-//         }
-//}
-
+/**
+ * Perform a DTLS handshake with the peer. See async_handshake_awaitable for details.
+ */
 template <class Stream>
 boost::asio::awaitable<boost::system::error_code> async_handshake_awaitable_dtls(Stream& stream) {
    boost::system::error_code ec;
    boost::asio::steady_timer timer{stream.get_executor()};
    using namespace boost::asio::experimental::awaitable_operators;
-   while(!ec) {
+   while(!ec && !stream.native_handle()->is_handshake_complete()) {
       if(stream.has_data_to_send()) {
          auto [written, writeEc] = co_await async_write_some_awaitable(stream);
          ec = writeEc;
       } else {
-         if(stream.native_handle()->is_active()) {
-            break;  // nothing to send and active connection -> we are done
+         // ... we first ensure that no TLS protocol error was detected until now.
+         // Otherwise, the handshake is aborted with an error code.
+         stream.handle_tls_protocol_errors(ec);
+         if(ec) {
+            break;
          }
 
          timer.expires_from_now(std::chrono::milliseconds(1000));
 
-         std::variant<std::size_t, std::monostate> result = co_await (stream.next_layer().async_read_some(
-                                                                         stream.input_buffer(), boost::asio::use_awaitable) ||
-                                                                      timer.async_wait(boost::asio::use_awaitable));
+         std::variant<std::size_t, std::monostate> result =
+            co_await (stream.next_layer().async_read_some(stream.input_buffer(), boost::asio::use_awaitable) ||
+                      timer.async_wait(boost::asio::use_awaitable));
 
          if(result.index() == 0) {
             const auto& bytesRead = std::get<0>(result);
             boost::asio::const_buffer read_buffer{stream.input_buffer().data(), bytesRead};
             stream.process_encrypted_data(read_buffer);
          }
-         // 1) If we didn't receive packet, we need to maybe retransmit.
-         // 2) If we received a packet, but we couldn't move on to the next state
-         // Then the remote is probably retransmitting as it didn't receive our ACK.
-         // Thus we need to check if we need to retransmit.
+         // If we didn't receive packet, we maybe need to retransmit or
+         // if we received a packet, but we couldn't move on to the next state
+         // then the remote is probably retransmitting as it didn't receive our ACK.
+         // thus we need to check if we need to retransmit.
          stream.native_handle()->timeout_check();
       }
    }
 
    co_return ec;
 }
-
 
 }  // namespace Botan::TLS::detail
 
