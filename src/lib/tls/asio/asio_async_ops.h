@@ -297,17 +297,17 @@ boost::asio::awaitable<std::pair<size_t, boost::system::error_code>> async_write
 }
 
 /**
-       * Perform a TLS handshake with the peer.
-       *
-       * Depending on the situation, this handler will:
-       *
-       * 1. Process TLS data received from the peer, and potentially:
-       *    * generate a response (another handshake flight, or an alert) or
-       *    * finalize the handshake,
-       * 2. Send pending data to the peer, or
-       * 3. Handle any pending TLS protocol errors and (if none were found) wait
-       *    for more data from the peer.
-       */
+ * Perform a TLS handshake with the peer.
+ *
+ * Depending on the situation, this handler will:
+ *
+ * 1. Process TLS data received from the peer, and potentially:
+ *    * generate a response (another handshake flight, or an alert) or
+ *    * finalize the handshake,
+ * 2. Send pending data to the peer, or
+ * 3. Handle any pending TLS protocol errors and (if none were found) wait
+ *    for more data from the peer.
+ */
 template <class Stream>
 boost::asio::awaitable<boost::system::error_code> async_handshake_awaitable(Stream& stream) {
    boost::system::error_code ec;
@@ -338,6 +338,12 @@ boost::asio::awaitable<boost::system::error_code> async_handshake_awaitable(Stre
       }
    }
 
+   // If we still have data to send, we do that now. It is intentionally split from the loop above to make the code more readable.
+   while(!ec && stream.has_data_to_send()) {
+      auto [written, writeEc] = co_await async_write_some_awaitable(stream);
+      ec = writeEc;
+   }
+
    co_return ec;
 }
 
@@ -361,15 +367,14 @@ boost::asio::awaitable<boost::system::error_code> async_handshake_awaitable_dtls
             break;
          }
 
-         timer.expires_from_now(std::chrono::milliseconds(1000));
+         timer.expires_after(std::chrono::milliseconds(1000));
 
          std::variant<std::size_t, std::monostate> result =
             co_await (stream.next_layer().async_read_some(stream.input_buffer(), boost::asio::use_awaitable) ||
                       timer.async_wait(boost::asio::use_awaitable));
 
-         if(result.index() == 0) {
-            const auto& bytesRead = std::get<0>(result);
-            boost::asio::const_buffer read_buffer{stream.input_buffer().data(), bytesRead};
+         if(auto* bytesRead = std::get_if<0>(&result)) {
+            boost::asio::const_buffer read_buffer{stream.input_buffer().data(), *bytesRead};
             stream.process_encrypted_data(read_buffer);
          }
          // If we didn't receive packet, we maybe need to retransmit or
@@ -378,6 +383,12 @@ boost::asio::awaitable<boost::system::error_code> async_handshake_awaitable_dtls
          // thus we need to check if we need to retransmit.
          stream.native_handle()->timeout_check();
       }
+   }
+
+   // If we still have data to send, we do that now. It is intentionally split from the loop above to make the code more readable.
+   while(!ec && stream.has_data_to_send()) {
+      auto [written, writeEc] = co_await async_write_some_awaitable(stream);
+      ec = writeEc;
    }
 
    co_return ec;

@@ -1077,7 +1077,9 @@ class Stream {
 // deduction guides for convenient construction from an existing
 // underlying transport stream T
 template <typename T>
-Stream(std::shared_ptr<Context>, std::shared_ptr<StreamCallbacks>, T) -> Stream<T>;
+Stream(std::shared_ptr<Context>, std::shared_ptr<StreamCallbacksTLS>, T) -> Stream<T>;
+template <typename T>
+Stream(std::shared_ptr<Context>, std::shared_ptr<StreamCallbacksDTLS>, T) -> Stream<T>;
 template <typename T>
 Stream(std::shared_ptr<Context>, T) -> Stream<T>;
 template <typename T>
