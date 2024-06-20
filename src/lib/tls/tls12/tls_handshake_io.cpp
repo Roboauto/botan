@@ -367,7 +367,6 @@ std::vector<uint8_t> Datagram_Handshake_IO::send_under_epoch(const Handshake_Mes
    m_flight_data[m_out_message_seq] = Message_Info(epoch, msg_type, msg_bits);
 
    m_out_message_seq += 1;
-   m_last_write = steady_clock_ms();
    m_next_timeout = m_initial_timeout;
 
    return send_message(m_out_message_seq - 1, epoch, msg_type, msg_bits);
@@ -378,7 +377,7 @@ std::vector<uint8_t> Datagram_Handshake_IO::send_message(uint16_t msg_seq,
                                                          Handshake_Type msg_type,
                                                          const std::vector<uint8_t>& msg_bits) {
    const size_t DTLS_HANDSHAKE_HEADER_LEN = 12;
-
+   m_last_write = steady_clock_ms();
    auto no_fragment = format_w_seq(msg_bits, msg_type, msg_seq);
 
    if(no_fragment.size() + DTLS_HEADER_SIZE <= m_mtu) {
